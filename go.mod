@@ -3,6 +3,7 @@ module github.com/srkyaganti/pm-crypto-insurance-bot
 go 1.25.3
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/rs/zerolog v1.34.0
 	github.com/smartcontractkit/data-streams-sdk/go v1.2.4
 	gopkg.in/yaml.v3 v3.0.1

@@ -1,0 +1,79 @@
+Begin Phase 1 implementation: Infrastructure Bootstrap (YAML Config Enabled).
+
+REPOSITORY CONTEXT:
+- Go module initialized (empty go.mod)
+- /resources contains authoritative system specs
+- Entry binary must be: cmd/engine/main.go
+- Config format selected: YAML (not ENV-only)
+
+STRICT PHASE 1 SCOPE (DO NOT EXCEED):
+1. Project folder structure creation
+2. cmd/engine/main.go (bootstrap + lifecycle wiring)
+3. internal/config package (YAML loader + validation)
+4. internal/logging package (structured NDJSON logger)
+5. internal/lifecycle package (context, signals, graceful shutdown, WaitGroup supervisor)
+6. internal/app package (application orchestrator)
+7. internal/state package (skeleton strictly matching STATE_SCHEMA.md)
+
+YAML CONFIG REQUIREMENTS (MANDATORY):
+- Use YAML as primary config source (config.yaml)
+- Support environment variable overrides (optional, non-breaking)
+- Strongly typed config structs
+- Validation on startup (fail fast if invalid)
+- Config must include:
+  - app settings (mode, symbol)
+  - logging settings
+  - connector configs (binance, polymarket, chainlink placeholders)
+  - risk settings (staleness thresholds)
+  - persistence settings (ndjson path)
+
+EXPECTED CONFIG FILE PATH:
+./configs/config.yaml
+
+ENGINEERING CONSTRAINTS (NON-NEGOTIABLE):
+1. Use idiomatic Go (1.22+)
+2. No global mutable state
+3. All long-running components must accept context.Context
+4. Proper SIGINT/SIGTERM graceful shutdown
+5. sync.WaitGroup for goroutine supervision
+6. Structured logging (JSON/NDJSON, not plain text)
+7. State store must align EXACTLY with STATE_SCHEMA.md (no deviations)
+8. No connectors implementation yet (only placeholders/interfaces)
+
+MAIN.GO RESPONSIBILITIES:
+- Load YAML config
+- Initialize logger
+- Initialize state store
+- Create root context with cancel()
+- Setup signal handling (SIGINT, SIGTERM)
+- Start app orchestrator
+- Block until shutdown signal
+- Perform graceful shutdown sequence
+
+LIFECYCLE DESIGN REQUIREMENTS:
+- Ordered startup: Config → Logger → State → App
+- Ordered shutdown: App → State → Logger flush
+- Context propagation to all subsystems
+- No orphan goroutines
+
+LOGGING REQUIREMENTS:
+- Structured JSON logs (NDJSON friendly)
+- Component field support (config, lifecycle, etc.)
+- Log levels (debug, info, warn, error)
+- File + stdout support
+
+CODE GENERATION RULES:
+- Generate module-by-module (max 3 files per response)
+- Fully compilable code (no pseudo code)
+- No TODO placeholders
+- Clear comments explaining lifecycle flow
+- Production-grade error handling
+- No external frameworks (standard lib + minimal deps only, e.g., yaml)
+
+DO NOT:
+- Implement Binance, Polymarket, or Chainlink connectors yet
+- Implement trading logic
+- Add unnecessary abstractions
+- Generate the entire codebase in one response
+
+After completing Phase 1 bootstrap, STOP and wait for review before proceeding to connectors phase.

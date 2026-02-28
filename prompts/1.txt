@@ -1,0 +1,94 @@
+You are a senior Go systems engineer building a production-grade, deterministic market engine.
+
+REPOSITORY STATE:
+- go.mod exists (empty project)
+- .gitignore exists
+- /resources directory contains authoritative architecture and integration specifications
+- No application code has been written yet
+
+CRITICAL: SPEC-DRIVEN DEVELOPMENT
+You MUST treat all files under /resources as the single source of truth.
+Do NOT invent architecture outside those documents.
+
+MANDATORY FILE INGESTION ORDER (READ FULLY BEFORE ANY OUTPUT):
+1. /resources/GO_SYSTEM_ARCHITECTURE.md (PRIMARY CONSTITUTION)
+2. /resources/IMPLEMENTATION_PLAN.md (PHASE EXECUTION ORDER)
+3. /resources/STATE_SCHEMA.md (CANONICAL DATA CONTRACT – STRICT)
+4. /resources/BINANCE_INTEGRATION_SPEC.md
+5. /resources/POLYMARKET_INTEGRATION_SPEC.md
+6. /resources/CHAINLINK_DATASTREAMS_INTEGRATION_SPEC.md
+
+SYSTEM GOAL:
+Build a production-grade Go infrastructure foundation for a single-symbol, config-driven market engine with:
+- Context-driven lifecycle (ctx.cancel)
+- Graceful startup and shutdown sequencing
+- Thread-safe shared state store (STRICTLY matching STATE_SCHEMA.md)
+- Modular connectors (Binance Spot + Perps, Polymarket CLOB, Chainlink Data Streams SDK)
+- Structured NDJSON logging
+- Deterministic decision loop (future phase)
+- Paper-trading safe architecture
+
+THIS IS NOT A TRADING STRATEGY IMPLEMENTATION TASK.
+This is infrastructure-first system design.
+
+GLOBAL ENGINEERING CONSTRAINTS (NON-NEGOTIABLE):
+1. Use idiomatic Go (Go 1.22+).
+2. Every long-running component MUST accept context.Context.
+3. No global mutable state.
+4. No hidden goroutines without lifecycle supervision.
+5. No business logic inside connectors.
+6. No trading logic in initial phases.
+7. Follow STATE_SCHEMA.md EXACTLY (do not invent new state structs).
+8. Connectors must strictly follow integration spec files (no undocumented APIs).
+9. Code must be readable and maintainable by a solo operator.
+10. Reliability and observability > performance optimizations.
+
+ENTRYPOINT REQUIREMENT:
+- Primary binary MUST be: cmd/engine/main.go
+- All core logic MUST live under internal/
+- main.go should only handle bootstrap + lifecycle orchestration
+
+REQUIRED GO PROJECT STRUCTURE:
+cmd/
+  engine/            # application entrypoint
+internal/
+  app/               # application orchestration
+  lifecycle/         # context, supervisor, shutdown
+  config/            # config loading
+  logging/           # structured NDJSON logger
+  state/             # state store (matches STATE_SCHEMA.md)
+  connectors/        # external data connectors
+  persistence/       # ndjson + optional s3 (future)
+
+LIFECYCLE DESIGN (MANDATORY):
+- Root context with cancel()
+- SIGINT/SIGTERM signal handling
+- Ordered startup (config → logging → state → connectors)
+- Ordered graceful shutdown (reverse order)
+- sync.WaitGroup for all goroutines
+- Connector health tracking integrated into state.Risk
+
+OUTPUT PROTOCOL (STRICT):
+Step 1: Provide a detailed architecture understanding summary from ALL resource files.
+Step 2: Validate that STATE_SCHEMA.md is the canonical in-memory contract.
+Step 3: Propose final package/module architecture aligned with Go best practices.
+Step 4: Generate the exact folder structure tree.
+Step 5: Define core interfaces (App, Connector, StateStore, LifecycleManager).
+Step 6: Produce a PHASE 1 implementation plan (bootstrap only).
+Step 7: STOP and wait for approval.
+
+DO NOT:
+- Generate the entire codebase at once
+- Implement connectors yet
+- Implement trading logic
+- Add extra dependencies without justification
+- Use heavy frameworks
+- Skip lifecycle design
+- Ignore ctx cancellation patterns
+
+IMPORTANT CONTEXT:
+This system will handle real capital (<$500 experimental trading), therefore:
+- Safety > speed
+- Determinism > concurrency complexity
+- Explicit logging > silent automation
+- Auditable code > clever abstractions

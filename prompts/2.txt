@@ -1,0 +1,21 @@
+Perform sequential architectural reasoning using the repository resource files.
+
+Tasks:
+1. Extract core invariants from GO_SYSTEM_ARCHITECTURE.md.
+2. Extract strict state boundaries from STATE_SCHEMA.md.
+3. Map each external dependency to a connector module:
+   - Chainlink (Data Streams Go SDK)
+   - Binance Spot (depth + bookTicker)
+   - Binance Perps (markPrice + forceOrder)
+   - Polymarket CLOB (market WS + user WS + REST)
+4. Define clean interface boundaries:
+   - lifecycle supervisor
+   - state store
+   - connectors
+   - app orchestrator
+   - persistence layer
+5. Identify risks related to feed staleness and connector failures.
+6. Produce a dependency-safe phased build order aligned with IMPLEMENTATION_PLAN.md.
+
+Do NOT generate code yet.
+Only architecture reasoning and validation.
