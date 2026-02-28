@@ -1,0 +1,54 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+bin/
+polymarket-arbitrage
+ingest
+
+# Go workspace
+go.work
+go.work.sum
+vendor/
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Environment and secrets
+.env
+.env.local
+.env.production
+*.key
+*.pem
+
+# Profiling outputs
+*.prof
+*.pprof
+*.out
+trace.out
+cpu.prof
+heap.prof
+goroutine.prof
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated code (can be regenerated)
+*_easyjson.go
+
+# Monitoring data
+prometheus-data/
+grafana-data/

@@ -1,0 +1,64 @@
+app:
+  mode: "paper"
+  symbol: "BTCUSDT"
+  tick_interval_ms: 100
+
+logging:
+  level: "info"
+  file_path: "./logs/engine.log"
+  max_size_mb: 100
+  max_backups: 10
+  max_age_days: 30
+  compress: true
+
+chainlink:
+  rest_url: "https://api.dataengine.chain.link"
+  ws_url: "wss://ws.dataengine.chain.link"
+  api_key: "${CHAINLINK_API_KEY}"
+  api_secret: "${CHAINLINK_API_SECRET}"
+  feed_id: "${CHAINLINK_FEED_ID}"
+  ws_ha: true
+  ws_max_reconnect: 10
+
+binance_spot:
+  symbol: "BTCUSDT"
+  ws_url: "wss://stream.binance.com:9443"
+  rest_url: "https://api.binance.com"
+  depth_speed: "100ms"
+  depth_limit: 20
+
+binance_perps:
+  symbol: "BTCUSDT"
+  ws_url: "wss://fstream.binance.com"
+
+polymarket:
+  clob_url: "https://clob.polymarket.com"
+  ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws/"
+  gamma_url: "https://gamma-api.polymarket.com"
+  api_key: "${POLYMARKET_API_KEY}"
+  api_secret: "${POLYMARKET_API_SECRET}"
+  passphrase: "${POLYMARKET_PASSPHRASE}"
+  private_key: "${POLYMARKET_PRIVATE_KEY}"
+  token_id: "${POLYMARKET_TOKEN_ID}"
+  condition_id: "${POLYMARKET_CONDITION_ID}"
+
+risk:
+  kill_switch: false
+  max_daily_losses: 2
+  max_order_size: 100.0
+  chainlink_stale_ms: 300
+  binance_stale_ms: 2000
+  polymarket_stale_ms: 2000
+  max_move_30s_pct: 0.5
+  max_move_60s_pct: 1.0
+  recovery_cooldown_sec: 5
+
+persistence:
+  enabled: true
+  ndjson_path: "./logs/events"
+  rotation_interval: 3600
+  flush_interval_ms: 1000
+  s3_enabled: false
+  s3_bucket: ""
+  s3_region: "us-east-1"
+  s3_prefix: "pm-insurance-bot/"
