@@ -50,15 +50,13 @@ type BinancePerpsConfig struct {
 }
 
 type PolymarketConfig struct {
-	ClobURL     string `yaml:"clob_url"`
-	WsURL       string `yaml:"ws_url"`
-	GammaURL    string `yaml:"gamma_url"`
-	ApiKey      string `yaml:"api_key"`
-	ApiSecret   string `yaml:"api_secret"`
-	Passphrase  string `yaml:"passphrase"`
-	PrivateKey  string `yaml:"private_key"`
-	TokenID     string `yaml:"token_id"`
-	ConditionID string `yaml:"condition_id"`
+	ClobURL    string `yaml:"clob_url"`
+	WsURL      string `yaml:"ws_url"`
+	GammaURL   string `yaml:"gamma_url"`
+	ApiKey     string `yaml:"api_key"`
+	ApiSecret  string `yaml:"api_secret"`
+	Passphrase string `yaml:"passphrase"`
+	PrivateKey string `yaml:"private_key"`
 }
 
 type RiskConfig struct {

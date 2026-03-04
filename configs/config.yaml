@@ -39,8 +39,6 @@ polymarket:
   api_secret: "${POLYMARKET_API_SECRET}"
   passphrase: "${POLYMARKET_PASSPHRASE}"
   private_key: "${POLYMARKET_PRIVATE_KEY}"
-  token_id: "${POLYMARKET_TOKEN_ID}"
-  condition_id: "${POLYMARKET_CONDITION_ID}"
 
 risk:
   kill_switch: false
