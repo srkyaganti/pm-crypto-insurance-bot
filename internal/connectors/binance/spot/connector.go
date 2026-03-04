@@ -18,8 +18,6 @@ type Connector struct {
 	name        string
 	config      *Config
 	wsClient    *WSClient
-	snapshot    *SnapshotClient
-	orderBook   *OrderBook
 	state       *state.StateStore
 	persistence *persistence.Writer
 	logger      *zerolog.Logger
@@ -29,9 +27,7 @@ type Connector struct {
 	wg      sync.WaitGroup
 	cancel  context.CancelFunc
 
-	health       HealthStatus
-	lastUpdateID int64
-	synced       bool
+	health HealthStatus
 }
 
 func NewConnector(
@@ -58,7 +54,6 @@ func NewConnector(
 		state:       stateStore,
 		persistence: persistWriter,
 		logger:      logger,
-		orderBook:   NewOrderBook(),
 		health: HealthStatus{
 			IsConnected: false,
 			IsStale:     true,
@@ -98,27 +93,18 @@ func (c *Connector) Start(ctx context.Context) error {
 	}
 
 	c.wsClient = NewWSClient(wsConfig, c.logger)
-	c.snapshot = NewSnapshotClient(&Config{
-		Symbol:  c.config.Symbol,
-		RestURL: restURL,
-	})
 
-	c.wsClient.OnDepthUpdate(c.handleDepthUpdate)
-	c.wsClient.OnBookTicker(c.handleBookTicker)
+	c.wsClient.OnDepthUpdate(c.handleDepthSnapshot)
+	c.wsClient.OnAggTrade(c.handleAggTrade)
 	c.wsClient.OnConnect(func() {
 		c.health.IsConnected = true
 		c.logEvent(persistence.EventConnector, "connected", map[string]interface{}{
-			"symbol": c.config.Symbol,
+			"symbol":  c.config.Symbol,
+			"streams": []string{"depth20@100ms", "aggTrade"},
 		})
-
-		if err := c.syncOrderBook(ctx); err != nil {
-			c.logger.Error().Err(err).Msg("binance spot: orderbook sync failed")
-		}
 	})
 	c.wsClient.OnDisconnect(func(err error) {
 		c.health.IsConnected = false
-		c.health.SnapshotSynced = false
-		c.synced = false
 		c.logEvent(persistence.EventConnector, "disconnected", map[string]interface{}{
 			"error": err.Error(),
 		})
@@ -167,109 +153,49 @@ func (c *Connector) Start(ctx context.Context) error {
 	return nil
 }
 
-func (c *Connector) syncOrderBook(ctx context.Context) error {
-	c.logger.Info().Msg("binance spot: starting orderbook sync")
-
-	snapshot, err := c.snapshot.FetchDepthSnapshot(ctx)
-	if err != nil {
-		c.health.Errors++
-		return fmt.Errorf("fetch snapshot: %w", err)
-	}
-
-	c.logger.Info().
-		Int64("last_update_id", snapshot.LastUpdateID).
-		Int("bids", len(snapshot.Bids)).
-		Int("asks", len(snapshot.Asks)).
-		Msg("binance spot: received depth snapshot")
-
-	bids, asks := ParsePriceLevelsFromSnapshot(snapshot, c.config.MaxDepthLevels)
-	c.orderBook.ApplySnapshot(bids, asks, c.config.MaxDepthLevels)
-	c.lastUpdateID = snapshot.LastUpdateID
-	c.synced = true
-	c.health.SnapshotSynced = true
-
-	c.logger.Info().Msg("binance spot: orderbook sync complete")
-
-	c.updateState()
-
-	return nil
-}
-
-func (c *Connector) handleDepthUpdate(data *DepthData) {
-	if !c.synced {
-		return
-	}
-
-	if data.FirstUpdateID > c.lastUpdateID+1 {
-		c.logger.Warn().
-			Int64("expected", c.lastUpdateID+1).
-			Int64("got", data.FirstUpdateID).
-			Msg("binance spot: depth update gap detected, resyncing")
-
-		c.synced = false
-		c.health.SnapshotSynced = false
-		go func() {
-			if err := c.syncOrderBook(context.Background()); err != nil {
-				c.logger.Error().Err(err).Msg("binance spot: resync failed")
-			}
-		}()
-		return
-	}
-
-	if data.FinalUpdateID < c.lastUpdateID {
-		return
-	}
-
-	c.orderBook.ApplyUpdate(data.Bids, data.Asks)
-	c.lastUpdateID = data.FinalUpdateID
+func (c *Connector) handleDepthSnapshot(data *DepthData) {
 	c.health.DepthUpdates++
 	c.health.LastDepthUpdate = time.Now()
 	c.health.IsStale = false
 
-	c.updateState()
-}
-
-func (c *Connector) handleBookTicker(data *BookTickerData) {
-	c.health.BookTickerUpdates++
-	c.health.LastBookTicker = time.Now()
-
-	c.state.UpdateBinanceSpot(func(s *state.BinanceSpotState) {
-		s.OrderBook.BestBid = data.BidPrice
-		s.OrderBook.BestAsk = data.AskPrice
-		s.OrderBook.MidPrice = (data.BidPrice + data.AskPrice) / 2
-		s.LastBookTicker = time.Now()
-		s.IsStale = false
-	})
-
-	c.state.UpdateRisk(func(s *state.RiskState) {
-		s.BinanceFresh = true
-		s.LastRiskUpdate = time.Now()
-	})
-}
-
-func (c *Connector) updateState() {
-	bids, asks := c.orderBook.GetTopLevels(c.config.MaxDepthLevels)
-	bestBid, bestAsk, midPrice := c.orderBook.GetBestBidAsk()
-
 	c.state.UpdateBinanceSpot(func(s *state.BinanceSpotState) {
 		s.Symbol = c.config.Symbol
-		s.OrderBook.Bids = make([]state.OrderLevel, 0, len(bids))
-		for _, bid := range bids {
+
+		s.OrderBook.Bids = make([]state.OrderLevel, 0, len(data.Bids))
+		cumBid := 0.0
+		for _, bid := range data.Bids {
 			s.OrderBook.Bids = append(s.OrderBook.Bids, state.OrderLevel{
 				Price: bid.Price,
 				Size:  bid.Size,
 			})
+			cumBid += bid.Size
 		}
-		s.OrderBook.Asks = make([]state.OrderLevel, 0, len(asks))
-		for _, ask := range asks {
+
+		s.OrderBook.Asks = make([]state.OrderLevel, 0, len(data.Asks))
+		cumAsk := 0.0
+		for _, ask := range data.Asks {
 			s.OrderBook.Asks = append(s.OrderBook.Asks, state.OrderLevel{
 				Price: ask.Price,
 				Size:  ask.Size,
 			})
+			cumAsk += ask.Size
 		}
-		s.OrderBook.BestBid = bestBid
-		s.OrderBook.BestAsk = bestAsk
-		s.OrderBook.MidPrice = midPrice
+
+		if len(s.OrderBook.Bids) > 0 {
+			s.OrderBook.BestBid = s.OrderBook.Bids[0].Price
+		}
+		if len(s.OrderBook.Asks) > 0 {
+			s.OrderBook.BestAsk = s.OrderBook.Asks[0].Price
+		}
+		if s.OrderBook.BestBid > 0 && s.OrderBook.BestAsk > 0 {
+			s.OrderBook.MidPrice = (s.OrderBook.BestBid + s.OrderBook.BestAsk) / 2
+		}
+
+		s.OrderBook.CumBidLiquidity = cumBid
+		s.OrderBook.CumAskLiquidity = cumAsk
+		s.OrderBook.LastUpdate = time.Now()
+		s.OrderBook.UpdateCount++
+
 		s.LastDepthUpdate = time.Now()
 		s.IsStale = false
 	})
@@ -278,6 +204,90 @@ func (c *Connector) updateState() {
 		s.BinanceFresh = true
 		s.LastRiskUpdate = time.Now()
 	})
+}
+
+func (c *Connector) handleAggTrade(data *AggTradeData) {
+	c.health.AggTradeUpdates++
+	c.health.LastAggTrade = time.Now()
+
+	c.state.UpdateBinanceSpot(func(s *state.BinanceSpotState) {
+		c.updateFlowBucket(s, data)
+	})
+}
+
+func (c *Connector) updateFlowBucket(s *state.BinanceSpotState, trade *AggTradeData) {
+	now := time.Now()
+	nowMs := now.UnixNano() / 1e6
+	currentBucketTime := (nowMs / 100) * 100
+
+	lastBucketTime := s.TradeFlow.Buckets[s.TradeFlow.BucketIdx].Timestamp
+	if lastBucketTime == 0 {
+		s.TradeFlow.Buckets[0] = state.FlowBucket{Timestamp: currentBucketTime}
+		s.TradeFlow.BucketIdx = 0
+	} else if currentBucketTime > lastBucketTime {
+		bucketsPassed := int((currentBucketTime - lastBucketTime) / 100)
+		if bucketsPassed > 300 {
+			bucketsPassed = 300
+		}
+
+		for i := 0; i < bucketsPassed; i++ {
+			s.TradeFlow.BucketIdx = (s.TradeFlow.BucketIdx + 1) % 300
+			s.TradeFlow.Buckets[s.TradeFlow.BucketIdx] = state.FlowBucket{}
+		}
+		s.TradeFlow.Buckets[s.TradeFlow.BucketIdx].Timestamp = currentBucketTime
+	}
+
+	bucket := &s.TradeFlow.Buckets[s.TradeFlow.BucketIdx]
+	if trade.IsBuy {
+		bucket.BuyNotional += trade.Notional
+		s.TradeFlow.TotalBuyNotional += trade.Notional
+	} else {
+		bucket.SellNotional += trade.Notional
+		s.TradeFlow.TotalSellNotional += trade.Notional
+	}
+	bucket.TradeCount++
+	s.TradeFlow.TotalTrades++
+	s.TradeFlow.LastTrade = now
+
+	c.calculateFlowWindows(s, nowMs)
+}
+
+func (c *Connector) calculateFlowWindows(s *state.BinanceSpotState, nowMs int64) {
+	var win10s, win30s state.FlowWindow
+
+	for i := 0; i < 300; i++ {
+		bucket := s.TradeFlow.Buckets[i]
+		if bucket.Timestamp == 0 {
+			continue
+		}
+
+		age := nowMs - bucket.Timestamp
+
+		if age < 10000 {
+			win10s.BuyNotional += bucket.BuyNotional
+			win10s.SellNotional += bucket.SellNotional
+			win10s.TradeCount += bucket.TradeCount
+		}
+
+		if age < 30000 {
+			win30s.BuyNotional += bucket.BuyNotional
+			win30s.SellNotional += bucket.SellNotional
+			win30s.TradeCount += bucket.TradeCount
+		}
+	}
+
+	total10 := win10s.BuyNotional + win10s.SellNotional
+	if total10 > 0 {
+		win10s.Imbalance = (win10s.BuyNotional - win10s.SellNotional) / total10
+	}
+
+	total30 := win30s.BuyNotional + win30s.SellNotional
+	if total30 > 0 {
+		win30s.Imbalance = (win30s.BuyNotional - win30s.SellNotional) / total30
+	}
+
+	s.TradeFlow.Window10s = win10s
+	s.TradeFlow.Window30s = win30s
 }
 
 func (c *Connector) checkStaleness() {
@@ -292,15 +302,15 @@ func (c *Connector) checkStaleness() {
 
 	if c.config.StaleThreshold > 0 {
 		timeSinceDepth := time.Since(c.health.LastDepthUpdate)
-		timeSinceTicker := time.Since(c.health.LastBookTicker)
+		timeSinceAggTrade := time.Since(c.health.LastAggTrade)
 
-		if timeSinceDepth > c.config.StaleThreshold || timeSinceTicker > c.config.StaleThreshold {
+		if timeSinceDepth > c.config.StaleThreshold {
 			c.health.IsStale = true
 			c.markStale()
 
 			c.logger.Warn().
 				Dur("depth_age", timeSinceDepth).
-				Dur("ticker_age", timeSinceTicker).
+				Dur("aggtrade_age", timeSinceAggTrade).
 				Msg("binance spot: feed marked as stale")
 		}
 	}
@@ -376,10 +386,6 @@ func (c *Connector) Health() error {
 		return fmt.Errorf("feed is stale")
 	}
 
-	if !c.health.SnapshotSynced {
-		return fmt.Errorf("orderbook not synced")
-	}
-
 	return nil
 }
 
@@ -401,8 +407,8 @@ func (c *Connector) IsRunning() bool {
 	return c.running
 }
 
-func (c *Connector) GetStats() (int64, int64, int64, bool) {
+func (c *Connector) GetStats() (int64, int64, int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.health.DepthUpdates, c.health.BookTickerUpdates, c.health.Errors, c.health.SnapshotSynced
+	return c.health.DepthUpdates, c.health.AggTradeUpdates, c.health.Errors
 }

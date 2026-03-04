@@ -46,21 +46,50 @@ type OrderLevel struct {
 }
 
 type OrderBookSnapshot struct {
-	Bids       []OrderLevel
-	Asks       []OrderLevel
-	BestBid    float64
-	BestAsk    float64
-	MidPrice   float64
-	LastUpdate time.Time
-	SequenceID int64
+	Bids            []OrderLevel
+	Asks            []OrderLevel
+	BestBid         float64
+	BestAsk         float64
+	MidPrice        float64
+	CumBidLiquidity float64
+	CumAskLiquidity float64
+	LastUpdate      time.Time
+	UpdateCount     int64
+}
+
+type FlowBucket struct {
+	Timestamp    int64
+	BuyNotional  float64
+	SellNotional float64
+	TradeCount   int64
+}
+
+type FlowWindow struct {
+	BuyNotional  float64
+	SellNotional float64
+	TradeCount   int64
+	Imbalance    float64
+}
+
+type TradeFlowState struct {
+	Buckets           [300]FlowBucket
+	BucketIdx         int
+	LastRotate        time.Time
+	Window10s         FlowWindow
+	Window30s         FlowWindow
+	TotalTrades       int64
+	TotalBuyNotional  float64
+	TotalSellNotional float64
+	LastTrade         time.Time
 }
 
 type BinanceSpotState struct {
 	Symbol          string
 	OrderBook       OrderBookSnapshot
+	TradeFlow       TradeFlowState
 	WallPersistence int
 	LastDepthUpdate time.Time
-	LastBookTicker  time.Time
+	LastAggTrade    time.Time
 	IsStale         bool
 }
 
@@ -160,6 +189,9 @@ func NewStateStore() *StateStore {
 				OrderBook: OrderBookSnapshot{
 					Bids: make([]OrderLevel, 0, 20),
 					Asks: make([]OrderLevel, 0, 20),
+				},
+				TradeFlow: TradeFlowState{
+					LastRotate: time.Now(),
 				},
 			},
 			BinancePerps: BinancePerpsState{

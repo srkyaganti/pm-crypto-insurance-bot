@@ -32,14 +32,11 @@ type WSClient struct {
 	stopOnce  sync.Once
 
 	onDepthUpdate func(data *DepthData)
-	onBookTicker  func(data *BookTickerData)
+	onAggTrade    func(data *AggTradeData)
 	onConnect     func()
 	onDisconnect  func(err error)
 
 	dialer *websocket.Dialer
-
-	pendingUpdates []*DepthData
-	updatesMu      sync.Mutex
 }
 
 func NewWSClient(cfg *Config, logger *zerolog.Logger) *WSClient {
@@ -50,7 +47,6 @@ func NewWSClient(cfg *Config, logger *zerolog.Logger) *WSClient {
 		dialer: &websocket.Dialer{
 			HandshakeTimeout: 10 * time.Second,
 		},
-		pendingUpdates: make([]*DepthData, 0, 100),
 	}
 }
 
@@ -58,8 +54,8 @@ func (w *WSClient) OnDepthUpdate(fn func(data *DepthData)) {
 	w.onDepthUpdate = fn
 }
 
-func (w *WSClient) OnBookTicker(fn func(data *BookTickerData)) {
-	w.onBookTicker = fn
+func (w *WSClient) OnAggTrade(fn func(data *AggTradeData)) {
+	w.onAggTrade = fn
 }
 
 func (w *WSClient) OnConnect(fn func()) {
@@ -77,10 +73,10 @@ func (w *WSClient) buildStreamURL() string {
 	}
 
 	symbolLower := strings.ToLower(w.config.Symbol)
-	depthStream := fmt.Sprintf("%s@depth@%s", symbolLower, w.config.DepthSpeed)
-	bookTickerStream := fmt.Sprintf("%s@bookTicker", symbolLower)
+	depthStream := fmt.Sprintf("%s@depth20@100ms", symbolLower)
+	aggTradeStream := fmt.Sprintf("%s@aggTrade", symbolLower)
 
-	return fmt.Sprintf("%s/stream?streams=%s/%s", wsURL, depthStream, bookTickerStream)
+	return fmt.Sprintf("%s/stream?streams=%s/%s", wsURL, depthStream, aggTradeStream)
 }
 
 func (w *WSClient) Connect(ctx context.Context) error {
@@ -198,30 +194,26 @@ func (w *WSClient) readLoop(ctx context.Context) error {
 }
 
 func (w *WSClient) handleStreamMessage(stream string, data json.RawMessage) {
-	if strings.HasSuffix(stream, "@depth@"+w.config.DepthSpeed) {
-		depthData, err := ParseDepthUpdate(data)
+	if strings.HasSuffix(stream, "@depth20@100ms") {
+		depthData, err := ParsePartialDepth(data)
 		if err != nil {
-			w.logger.Error().Err(err).Msg("binance spot: parse depth update")
+			w.logger.Error().Err(err).Msg("binance spot: parse partial depth")
 			return
 		}
-
-		w.updatesMu.Lock()
-		w.pendingUpdates = append(w.pendingUpdates, depthData)
-		w.updatesMu.Unlock()
 
 		if w.onDepthUpdate != nil {
 			w.onDepthUpdate(depthData)
 		}
 
-	} else if strings.HasSuffix(stream, "@bookTicker") {
-		tickerData, err := ParseBookTicker(data)
+	} else if strings.HasSuffix(stream, "@aggTrade") {
+		tradeData, err := ParseAggTrade(data)
 		if err != nil {
-			w.logger.Error().Err(err).Msg("binance spot: parse book ticker")
+			w.logger.Error().Err(err).Msg("binance spot: parse aggTrade")
 			return
 		}
 
-		if w.onBookTicker != nil {
-			w.onBookTicker(tickerData)
+		if w.onAggTrade != nil {
+			w.onAggTrade(tradeData)
 		}
 	}
 }
@@ -284,19 +276,4 @@ func (w *WSClient) Stop() {
 
 func (w *WSClient) IsConnected() bool {
 	return w.connected.Load()
-}
-
-func (w *WSClient) GetPendingUpdates() []*DepthData {
-	w.updatesMu.Lock()
-	defer w.updatesMu.Unlock()
-
-	updates := w.pendingUpdates
-	w.pendingUpdates = make([]*DepthData, 0, 100)
-	return updates
-}
-
-func (w *WSClient) ClearPendingUpdates() {
-	w.updatesMu.Lock()
-	defer w.updatesMu.Unlock()
-	w.pendingUpdates = make([]*DepthData, 0, 100)
 }

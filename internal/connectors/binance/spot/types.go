@@ -14,29 +14,33 @@ type Config struct {
 	StaleThreshold time.Duration
 }
 
-type DepthUpdate struct {
-	EventType     string     `json:"e"`
-	EventTime     int64      `json:"E"`
-	Symbol        string     `json:"s"`
-	FirstUpdateID int64      `json:"U"`
-	FinalUpdateID int64      `json:"u"`
-	Bids          [][]string `json:"b"`
-	Asks          [][]string `json:"a"`
+type PartialDepthEvent struct {
+	EventType string     `json:"e"`
+	EventTime int64      `json:"E"`
+	Symbol    string     `json:"s"`
+	Bids      [][]string `json:"b"`
+	Asks      [][]string `json:"a"`
 }
 
-type BookTicker struct {
-	UpdateID int64  `json:"u"`
-	Symbol   string `json:"s"`
-	BidPrice string `json:"b"`
-	BidQty   string `json:"B"`
-	AskPrice string `json:"a"`
-	AskQty   string `json:"A"`
+type AggTradeEvent struct {
+	EventType    string `json:"e"`
+	EventTime    int64  `json:"E"`
+	Symbol       string `json:"s"`
+	TradeID      int64  `json:"a"`
+	Price        string `json:"p"`
+	Quantity     string `json:"q"`
+	TradeTime    int64  `json:"T"`
+	IsBuyerMaker bool   `json:"m"`
 }
 
-type DepthSnapshot struct {
-	LastUpdateID int64      `json:"lastUpdateId"`
-	Bids         [][]string `json:"bids"`
-	Asks         [][]string `json:"asks"`
+type AggTradeData struct {
+	Symbol    string
+	TradeID   int64
+	Price     float64
+	Quantity  float64
+	Notional  float64
+	IsBuy     bool
+	Timestamp time.Time
 }
 
 type CombinedStreamMessage struct {
@@ -50,31 +54,19 @@ type PriceLevel struct {
 }
 
 type DepthData struct {
-	Symbol        string
-	FirstUpdateID int64
-	FinalUpdateID int64
-	EventTime     int64
-	Bids          []PriceLevel
-	Asks          []PriceLevel
-}
-
-type BookTickerData struct {
-	Symbol   string
-	UpdateID int64
-	BidPrice float64
-	BidQty   float64
-	AskPrice float64
-	AskQty   float64
+	Symbol    string
+	EventTime int64
+	Bids      []PriceLevel
+	Asks      []PriceLevel
 }
 
 type HealthStatus struct {
-	IsConnected       bool
-	IsStale           bool
-	LastDepthUpdate   time.Time
-	LastBookTicker    time.Time
-	SnapshotSynced    bool
-	Reconnects        int
-	Errors            int64
-	DepthUpdates      int64
-	BookTickerUpdates int64
+	IsConnected     bool
+	IsStale         bool
+	LastDepthUpdate time.Time
+	LastAggTrade    time.Time
+	Reconnects      int
+	Errors          int64
+	DepthUpdates    int64
+	AggTradeUpdates int64
 }
