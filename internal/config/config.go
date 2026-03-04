@@ -15,11 +15,11 @@ func Load(path string) (*Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	if err := yaml.Unmarshal([]byte(os.ExpandEnv(string(data))), &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	applyEnvOverrides(&cfg)
+	//applyEnvOverrides(&cfg)
 
 	if err := Validate(&cfg); err != nil {
 		return nil, fmt.Errorf("config validation failed: %w", err)

@@ -179,9 +179,10 @@ func (c *Connector) handleReport(reportResp *streams.ReportResponse) error {
 
 	c.lastUpdate = now
 
-	c.logger.Debug().
+	c.logger.Info().
 		Float64("price", price).
 		Uint32("obs_ts", decoded.Data.ObservationsTimestamp).
+		Int64("now_ts", now.Unix()).
 		Msg("chainlink: price update")
 
 	return nil

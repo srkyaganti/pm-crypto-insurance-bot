@@ -1,15 +1,12 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/config"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors"
-	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/binance/perps"
-	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/binance/spot"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/chainlink"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/lifecycle"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/logging"
@@ -93,37 +90,37 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 	)
 	a.connectors = append(a.connectors, chainlinkConnector)
 
-	binanceSpotCfg := &spot.Config{
-		Symbol:         a.config.BinanceSpot.Symbol,
-		WsURL:          a.config.BinanceSpot.WsURL,
-		RestURL:        a.config.BinanceSpot.RestURL,
-		DepthSpeed:     a.config.BinanceSpot.DepthSpeed,
-		MaxDepthLevels: a.config.BinanceSpot.DepthLimit,
-		StaleThreshold: time.Duration(a.config.Risk.BinanceStaleMs) * time.Millisecond,
-	}
-
-	binanceSpotConnector := spot.NewConnector(
-		binanceSpotCfg,
-		a.state,
-		a.persistence,
-		logger,
-	)
-	a.connectors = append(a.connectors, binanceSpotConnector)
-
-	binancePerpsCfg := &perps.Config{
-		Symbol:          a.config.BinancePerps.Symbol,
-		WsURL:           a.config.BinancePerps.WsURL,
-		StaleThreshold:  time.Duration(a.config.Risk.BinanceStaleMs) * time.Millisecond,
-		MaxLiquidations: 100,
-	}
-
-	binancePerpsConnector := perps.NewConnector(
-		binancePerpsCfg,
-		a.state,
-		a.persistence,
-		logger,
-	)
-	a.connectors = append(a.connectors, binancePerpsConnector)
+	//binanceSpotCfg := &spot.Config{
+	//	Symbol:         a.config.BinanceSpot.Symbol,
+	//	WsURL:          a.config.BinanceSpot.WsURL,
+	//	RestURL:        a.config.BinanceSpot.RestURL,
+	//	DepthSpeed:     a.config.BinanceSpot.DepthSpeed,
+	//	MaxDepthLevels: a.config.BinanceSpot.DepthLimit,
+	//	StaleThreshold: time.Duration(a.config.Risk.BinanceStaleMs) * time.Millisecond,
+	//}
+	//
+	//binanceSpotConnector := spot.NewConnector(
+	//	binanceSpotCfg,
+	//	a.state,
+	//	a.persistence,
+	//	logger,
+	//)
+	//a.connectors = append(a.connectors, binanceSpotConnector)
+	//
+	//binancePerpsCfg := &perps.Config{
+	//	Symbol:          a.config.BinancePerps.Symbol,
+	//	WsURL:           a.config.BinancePerps.WsURL,
+	//	StaleThreshold:  time.Duration(a.config.Risk.BinanceStaleMs) * time.Millisecond,
+	//	MaxLiquidations: 100,
+	//}
+	//
+	//binancePerpsConnector := perps.NewConnector(
+	//	binancePerpsCfg,
+	//	a.state,
+	//	a.persistence,
+	//	logger,
+	//)
+	//a.connectors = append(a.connectors, binancePerpsConnector)
 
 	a.logger.Info().
 		Int("count", len(a.connectors)).
@@ -179,20 +176,13 @@ func (a *App) startConnectors() error {
 	for _, conn := range a.connectors {
 		a.logger.Info().Str("connector", conn.Name()).Msg("starting connector")
 
-		connCtx, cancel := context.WithCancel(ctx)
-
-		a.supervisor.Add(1)
-		go func(c connectors.Connector, cancelFunc context.CancelFunc) {
-			defer a.supervisor.Done()
-			defer cancelFunc()
-
-			if err := c.Start(connCtx); err != nil {
-				a.logger.Error().
-					Err(err).
-					Str("connector", c.Name()).
-					Msg("connector exited with error")
-			}
-		}(conn, cancel)
+		if err := conn.Start(ctx); err != nil {
+			a.logger.Error().
+				Err(err).
+				Str("connector", conn.Name()).
+				Msg("failed to start connector")
+			return err
+		}
 
 		a.logConnectorEvent(conn.Name(), persistence.EventConnector, "started", nil)
 	}
