@@ -109,9 +109,6 @@ func ValidateConnectorCredentials(cfg *Config) error {
 	if cfg.Polymarket.Passphrase == "" {
 		return fmt.Errorf("polymarket.passphrase is required")
 	}
-	if cfg.Polymarket.TokenID == "" {
-		return fmt.Errorf("polymarket.token_id is required")
-	}
 
 	return nil
 }

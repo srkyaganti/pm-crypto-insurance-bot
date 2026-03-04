@@ -123,11 +123,11 @@ type PMOrderBook struct {
 	LastUpdate time.Time
 }
 
-type MarketMeta struct {
+type MarketAssetMeta struct {
+	AssetID     string
 	ConditionID string
-	YesTokenID  string
-	NoTokenID   string
-	ExpiryTime  time.Time
+	Outcome     string
+	Question    string
 }
 
 type OrderStatus struct {
@@ -139,11 +139,12 @@ type OrderStatus struct {
 }
 
 type PolymarketState struct {
-	Market       MarketMeta
-	OrderBook    PMOrderBook
-	LastWSUpdate time.Time
-	ActiveOrder  *OrderStatus
-	IsStale      bool
+	OrderBooks       map[string]*PMOrderBook
+	MarketAssets     map[string]*MarketAssetMeta
+	SubscribedAssets []string
+	LastWSUpdate     time.Time
+	ActiveOrders     map[string]*OrderStatus
+	IsStale          bool
 }
 
 type RiskState struct {
@@ -198,10 +199,10 @@ func NewStateStore() *StateStore {
 				RecentLiquidations: make([]LiquidationEvent, 0, 100),
 			},
 			Polymarket: PolymarketState{
-				OrderBook: PMOrderBook{
-					Bids: make([]PMOrderLevel, 0, 20),
-					Asks: make([]PMOrderLevel, 0, 20),
-				},
+				OrderBooks:       make(map[string]*PMOrderBook),
+				MarketAssets:     make(map[string]*MarketAssetMeta),
+				SubscribedAssets: make([]string, 0),
+				ActiveOrders:     make(map[string]*OrderStatus),
 			},
 			Risk: RiskState{
 				FeedsHealthy:    false,
