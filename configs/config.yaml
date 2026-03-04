@@ -1,6 +1,6 @@
 app:
   mode: "paper"
-  symbol: "BTCUSDT"
+  symbol: "${SYMBOL}"
   tick_interval_ms: 100
 
 logging:
@@ -21,14 +21,14 @@ chainlink:
   ws_max_reconnect: 10
 
 binance_spot:
-  symbol: "BTCUSDT"
+  symbol: "${BINANCE_SYMBOL}"
   ws_url: "wss://stream.binance.com:9443"
   rest_url: "https://api.binance.com"
   depth_speed: "100ms"
   depth_limit: 20
 
 binance_perps:
-  symbol: "BTCUSDT"
+  symbol: "${BINANCE_SYMBOL}"
   ws_url: "wss://fstream.binance.com"
 
 polymarket:
