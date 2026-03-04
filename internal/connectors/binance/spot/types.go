@@ -15,11 +15,9 @@ type Config struct {
 }
 
 type PartialDepthEvent struct {
-	EventType string     `json:"e"`
-	EventTime int64      `json:"E"`
-	Symbol    string     `json:"s"`
-	Bids      [][]string `json:"b"`
-	Asks      [][]string `json:"a"`
+	LastUpdateID int64      `json:"lastUpdateId"`
+	Bids         [][]string `json:"bids"`
+	Asks         [][]string `json:"asks"`
 }
 
 type AggTradeEvent struct {
@@ -54,10 +52,9 @@ type PriceLevel struct {
 }
 
 type DepthData struct {
-	Symbol    string
-	EventTime int64
-	Bids      []PriceLevel
-	Asks      []PriceLevel
+	LastUpdateID int64
+	Bids         []PriceLevel
+	Asks         []PriceLevel
 }
 
 type HealthStatus struct {

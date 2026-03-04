@@ -14,10 +14,9 @@ func ParsePartialDepth(raw json.RawMessage) (*DepthData, error) {
 	}
 
 	data := &DepthData{
-		Symbol:    event.Symbol,
-		EventTime: event.EventTime,
-		Bids:      make([]PriceLevel, 0, len(event.Bids)),
-		Asks:      make([]PriceLevel, 0, len(event.Asks)),
+		LastUpdateID: event.LastUpdateID,
+		Bids:         make([]PriceLevel, 0, len(event.Bids)),
+		Asks:         make([]PriceLevel, 0, len(event.Asks)),
 	}
 
 	for _, bid := range event.Bids {
