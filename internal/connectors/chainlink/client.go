@@ -133,3 +133,42 @@ func (c *Client) Stats() streams.Stats {
 	}
 	return c.stream.Stats()
 }
+
+func (c *Client) GetReportAtTimestamp(ctx context.Context, timestamp uint64) (*streams.ReportResponse, error) {
+	if c.sdkClient == nil {
+		return nil, fmt.Errorf("client not initialized")
+	}
+
+	reports, err := c.sdkClient.GetReports(ctx, []feed.ID{c.feedID}, timestamp)
+	if err != nil {
+		return nil, fmt.Errorf("get report at timestamp %d: %w", timestamp, err)
+	}
+
+	if len(reports) == 0 {
+		return nil, fmt.Errorf("no report available for timestamp %d", timestamp)
+	}
+
+	return reports[0], nil
+}
+
+func (c *Client) GetReportAtTimestampForFeed(ctx context.Context, feedID string, timestamp uint64) (*streams.ReportResponse, error) {
+	if c.sdkClient == nil {
+		return nil, fmt.Errorf("client not initialized")
+	}
+
+	var fid feed.ID
+	if err := fid.FromString(feedID); err != nil {
+		return nil, fmt.Errorf("invalid feed ID: %w", err)
+	}
+
+	reports, err := c.sdkClient.GetReports(ctx, []feed.ID{fid}, timestamp)
+	if err != nil {
+		return nil, fmt.Errorf("get report at timestamp %d: %w", timestamp, err)
+	}
+
+	if len(reports) == 0 {
+		return nil, fmt.Errorf("no report available for timestamp %d", timestamp)
+	}
+
+	return reports[0], nil
+}

@@ -22,3 +22,10 @@ type HealthStatus struct {
 	ReportsCount int64
 	Errors       int64
 }
+
+type DecodedReport struct {
+	FeedID                string
+	BenchmarkPrice        float64
+	ObservationsTimestamp uint32
+	ValidFromTimestamp    uint32
+}

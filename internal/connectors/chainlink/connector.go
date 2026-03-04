@@ -314,3 +314,57 @@ func (c *Connector) GetStats() (int64, int64) {
 	defer c.mu.Unlock()
 	return c.health.ReportsCount, c.health.Errors
 }
+
+func (c *Connector) decodeReport(reportResp *streams.ReportResponse) (*DecodedReport, error) {
+	decoded, err := report.Decode[v3.Data](reportResp.FullReport)
+	if err != nil {
+		return nil, fmt.Errorf("decode report: %w", err)
+	}
+
+	return &DecodedReport{
+		FeedID:                decoded.Data.FeedID.String(),
+		BenchmarkPrice:        bigIntToFloat(decoded.Data.BenchmarkPrice),
+		ObservationsTimestamp: decoded.Data.ObservationsTimestamp,
+		ValidFromTimestamp:    decoded.Data.ValidFromTimestamp,
+	}, nil
+}
+
+func (c *Connector) GetReportAtTimestamp(ctx context.Context, timestamp uint64) (*DecodedReport, error) {
+	reportResp, err := c.client.GetReportAtTimestamp(ctx, timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	report, err := c.decodeReport(reportResp)
+	if err != nil {
+		return nil, err
+	}
+
+	c.logger.Debug().
+		Str("feed_id", report.FeedID).
+		Uint64("timestamp", timestamp).
+		Float64("benchmark_price", report.BenchmarkPrice).
+		Msg("chainlink: fetched historical report")
+
+	return report, nil
+}
+
+func (c *Connector) GetReportAtTimestampForFeed(ctx context.Context, feedID string, timestamp uint64) (*DecodedReport, error) {
+	reportResp, err := c.client.GetReportAtTimestampForFeed(ctx, feedID, timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	report, err := c.decodeReport(reportResp)
+	if err != nil {
+		return nil, err
+	}
+
+	c.logger.Debug().
+		Str("feed_id", report.FeedID).
+		Uint64("timestamp", timestamp).
+		Float64("benchmark_price", report.BenchmarkPrice).
+		Msg("chainlink: fetched historical report")
+
+	return report, nil
+}
