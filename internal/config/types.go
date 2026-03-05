@@ -50,13 +50,22 @@ type BinancePerpsConfig struct {
 }
 
 type PolymarketConfig struct {
-	ClobURL    string `yaml:"clob_url"`
-	WsURL      string `yaml:"ws_url"`
-	GammaURL   string `yaml:"gamma_url"`
-	ApiKey     string `yaml:"api_key"`
-	ApiSecret  string `yaml:"api_secret"`
-	Passphrase string `yaml:"passphrase"`
-	PrivateKey string `yaml:"private_key"`
+	ClobURL    string        `yaml:"clob_url"`
+	WsURL      string        `yaml:"ws_url"`
+	GammaURL   string        `yaml:"gamma_url"`
+	ApiKey     string        `yaml:"api_key"`
+	ApiSecret  string        `yaml:"api_secret"`
+	Passphrase string        `yaml:"passphrase"`
+	PrivateKey string        `yaml:"private_key"`
+	Tracker    TrackerConfig `yaml:"tracker"`
+}
+
+type TrackerConfig struct {
+	Enabled            bool     `yaml:"enabled"`
+	MarketPrefixes     []string `yaml:"market_prefixes"`
+	Windows            []int    `yaml:"windows"`
+	PreScheduleWindows int      `yaml:"pre_schedule_windows"`
+	CustomFeatures     bool     `yaml:"custom_features"`
 }
 
 type RiskConfig struct {

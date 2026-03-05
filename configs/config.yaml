@@ -33,12 +33,22 @@ binance_perps:
 
 polymarket:
   clob_url: "https://clob.polymarket.com"
-  ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws/"
+  ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws/market"
   gamma_url: "https://gamma-api.polymarket.com"
   api_key: "${POLYMARKET_API_KEY}"
   api_secret: "${POLYMARKET_API_SECRET}"
   passphrase: "${POLYMARKET_PASSPHRASE}"
   private_key: "${POLYMARKET_PRIVATE_KEY}"
+  
+  tracker:
+    enabled: true
+    market_prefixes:
+      - "btc-updown-"
+    windows:
+      - 5
+      - 15
+    pre_schedule_windows: 3
+    custom_features: true
 
 risk:
   kill_switch: false

@@ -1,0 +1,82 @@
+package tracker
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/persistence"
+)
+
+func (c *Connector) ExecutePaperTrade(slug, assetID, side, reason string, size float64) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	market, exists := c.activeMarkets[slug]
+	if !exists {
+		return fmt.Errorf("market not found: %s", slug)
+	}
+
+	pmState := c.state.GetPolymarket()
+	ob := pmState.OrderBooks[assetID]
+	if ob == nil {
+		return fmt.Errorf("no orderbook for asset: %s", assetID)
+	}
+
+	execPrice := ob.MidPrice
+
+	trade := PaperTrade{
+		Timestamp: time.Now(),
+		AssetID:   assetID,
+		Side:      side,
+		Price:     execPrice,
+		Size:      size,
+		Reason:    reason,
+	}
+
+	market.PaperTrades = append(market.PaperTrades, trade)
+
+	if market.MyPosition == nil {
+		outcome := "no"
+		if assetID == market.YesAssetID {
+			outcome = "yes"
+		}
+
+		market.MyPosition = &Position{
+			AssetID:    assetID,
+			Side:       outcome,
+			EntryPrice: execPrice,
+			Size:       size,
+			OpenedAt:   time.Now(),
+		}
+	}
+
+	c.logEvent(persistence.EventDecision, "paper_trade_executed", map[string]interface{}{
+		"slug":   slug,
+		"asset":  assetID,
+		"side":   side,
+		"price":  execPrice,
+		"size":   size,
+		"reason": reason,
+	})
+
+	c.logger.Info().
+		Str("slug", slug).
+		Str("asset_id", assetID).
+		Str("side", side).
+		Float64("price", execPrice).
+		Float64("size", size).
+		Str("reason", reason).
+		Msg("tracker: executed paper trade")
+
+	return nil
+}
+
+func (c *Connector) GetMarketPosition(slug string) *Position {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if market, exists := c.activeMarkets[slug]; exists {
+		return market.MyPosition
+	}
+	return nil
+}
