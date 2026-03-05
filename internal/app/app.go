@@ -127,63 +127,20 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 	)
 	a.connectors = append(a.connectors, binancePerpsConnector)
 
-	// Create tracker-specific chainlink client (for REST API calls)
-	if a.config.Polymarket.Tracker.Enabled {
-        chainlinkClient, err := chainlink.NewClient(&chainlink.Config{
-            RestURL:        a.config.Chainlink.RestURL,
-            WsURL:          a.config.Chainlink.WsURL,
-            ApiKey:         a.config.Chainlink.ApiKey,
-            ApiSecret:      a.config.Chainlink.ApiSecret,
-            FeedID:         a.config.Chainlink.FeedID,
-            WsHA:           a.config.Chainlink.WsHA
-            WsMaxReconnect: a.config.Chainlink.WsMaxReconnect,
-        }, logger)
-        if err != nil {
-            return fmt.Errorf("create chainlink client for tracker: %w", err)
-        }
-        if err := chainlinkClient.Initialize(); err != nil {
-            return fmt.Errorf("initialize chainlink client for tracker: %w", err)
-        }
-    }
-
-    trackerCfg := &tracker.TrackerConfig{
-        MarketPrefixes:     a.config.Polymarket.Tracker.MarketPrefixes,
-        Windows:            a.config.Polymarket.Tracker.Windows
-        PreScheduleWindows: a.config.Polymarket.Tracker.PreScheduleWindows
-        CustomFeatures:     a.config.Polymarket.Tracker.CustomFeatures
-    }
-
-    // Create gamma client
-    gammaClient := gamma.NewClient(gamma.ClientConfig{
-        BaseURL: a.config.Polymarket.GammaURL,
-    })
-
-    // Type assert market connector
-    marketConn, ok := marketConnector.(*market.Connector)
-    if !ok {
-        return fmt.Errorf("failed to cast market connector")
-    }
-
-    // Create tracker connector
-    trackerConnector := tracker.NewConnector(
-        gammaClient,
-        marketConn,
-        chainlinkClient,
-        trackerCfg,
-        a.config.Chainlink.FeedID,
-        a.state,
-        a.persistence,
-        logger,
-    )
-    a.connectors = append(a.connectors, trackerConnector)
-}
+	marketCfg := &market.Config{
+		WsURL:                a.config.Polymarket.WsURL,
+		CustomFeatureEnabled: a.config.Polymarket.Tracker.CustomFeatures,
+		ReconnectMinWait:     market.DefaultReconnectMinWait,
+		ReconnectMaxWait:     market.DefaultReconnectMaxWait,
+		PingPeriod:           market.DefaultPingPeriod,
+		PongWait:             market.DefaultPongWait,
+		WriteWait:            market.DefaultWriteWait,
+	}
 
 	marketConnector := market.NewConnector(marketCfg, a.state, logger)
 	a.connectors = append(a.connectors, marketConnector)
 
-	// Initialize Polymarket Tracker connector if enabled
 	if a.config.Polymarket.Tracker.Enabled {
-		// Create tracker-specific chainlink client (for REST API calls)
 		chainlinkClient, err := chainlink.NewClient(&chainlink.Config{
 			RestURL:        a.config.Chainlink.RestURL,
 			WsURL:          a.config.Chainlink.WsURL,
@@ -208,18 +165,15 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 			CustomFeatures:     a.config.Polymarket.Tracker.CustomFeatures,
 		}
 
-		// Create gamma client
 		gammaClient := gamma.NewClient(gamma.ClientConfig{
 			BaseURL: a.config.Polymarket.GammaURL,
 		})
 
-		// Type assert market connector
 		marketConn, ok := marketConnector.(*market.Connector)
 		if !ok {
 			return fmt.Errorf("failed to cast market connector")
 		}
 
-		// Create tracker connector
 		trackerConnector := tracker.NewConnector(
 			gammaClient,
 			marketConn,
@@ -233,36 +187,11 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 		a.connectors = append(a.connectors, trackerConnector)
 	}
 
-	// Create gamma client
-	gammaClient := gamma.NewClient(gamma.ClientConfig{
-		BaseURL: a.config.Polymarket.GammaURL,
-	})
+	a.logger.Info().
+		Int("count", len(a.connectors)).
+		Msg("connectors initialized")
 
-	// Type assert connectors
-	marketConn, ok := marketConnector.(*market.Connector)
-	if !ok {
-		return fmt.Errorf("failed to cast market connector")
-	}
-
-	// Create tracker connector
-	trackerConnector := tracker.NewConnector(
-		gammaClient,
-		marketConn,
-		chainlinkConnector,
-		trackerCfg,
-		a.config.Chainlink.FeedID,
-		a.state,
-		a.persistence,
-		logger,
-	)
-	a.connectors = append(a.connectors, trackerConnector)
-}
-
-a.logger.Info().
-Int("count", len(a.connectors)).
-Msg("connectors initialized")
-
-return nil
+	return nil
 }
 
 func (a *App) Run() error {

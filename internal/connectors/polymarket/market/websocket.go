@@ -208,6 +208,35 @@ func (w *WSClient) readLoop(ctx context.Context) error {
 }
 
 func (w *WSClient) handleMessage(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+
+	dataStr := string(data)
+	if !json.Valid(data) {
+		if dataStr == "INVALID OPERATION" || dataStr == "INVALID" {
+			w.logger.Error().Str("message", dataStr).Msg("polymarket market: received protocol error from server")
+		} else {
+			w.logger.Warn().Str("message", dataStr).Msg("polymarket market: received non-JSON message")
+		}
+		return
+	}
+
+	if data[0] == '[' {
+		var events []json.RawMessage
+		if err := json.Unmarshal(data, &events); err != nil {
+			w.logger.Error().Err(err).Bytes("data", data).Msg("polymarket market: failed to parse event array")
+			return
+		}
+		for _, event := range events {
+			w.handleSingleMessage(event)
+		}
+	} else {
+		w.handleSingleMessage(data)
+	}
+}
+
+func (w *WSClient) handleSingleMessage(data []byte) {
 	var baseMsg struct {
 		EventType string `json:"event_type"`
 	}
