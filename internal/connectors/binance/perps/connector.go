@@ -47,6 +47,9 @@ func NewConnector(
 	if cfg.StaleThreshold == 0 {
 		cfg.StaleThreshold = 2 * time.Second
 	}
+	if cfg.LiquidationWindowSecs == 0 {
+		cfg.LiquidationWindowSecs = 60
+	}
 
 	liquidations := make(map[string][]state.LiquidationEvent, len(cfg.SymbolToKey))
 	for _, canonical := range cfg.SymbolToKey {
@@ -148,6 +151,7 @@ func (c *Connector) Start(ctx context.Context) error {
 				return
 			case <-ticker.C:
 				c.checkStaleness()
+				c.pruneLiquidations()
 			}
 		}
 	}()
@@ -204,10 +208,10 @@ func (c *Connector) handleLiquidation(symbol string, data *LiquidationData) {
 		liqList = liqList[1:]
 	}
 	c.liquidations[symbol] = liqList
-	liquidationCount := len(liqList)
+	recentCount := c.countRecentLiquidations(symbol, now)
 	c.liquidationsMu.Unlock()
 
-	liquidationFlag := liquidationCount >= 3
+	liquidationFlag := recentCount >= 3
 
 	c.state.UpdateBinancePerps(symbol, func(s *state.BinancePerpsState) {
 		s.RecentLiquidations = c.getLiquidationsCopy(symbol)
@@ -219,7 +223,7 @@ func (c *Connector) handleLiquidation(symbol string, data *LiquidationData) {
 		"side":         data.Side,
 		"price":        data.Price,
 		"quantity":     data.Quantity,
-		"recent_count": liquidationCount,
+		"recent_count": recentCount,
 		"cluster_flag": liquidationFlag,
 	})
 
@@ -228,7 +232,7 @@ func (c *Connector) handleLiquidation(symbol string, data *LiquidationData) {
 		Str("side", data.Side).
 		Float64("price", data.Price).
 		Float64("quantity", data.Quantity).
-		Int("recent_count", liquidationCount).
+		Int("recent_count", recentCount).
 		Bool("cluster_flag", liquidationFlag).
 		Msg("binance perps: liquidation event")
 }
@@ -241,6 +245,42 @@ func (c *Connector) getLiquidationsCopy(symbol string) []state.LiquidationEvent 
 	cp := make([]state.LiquidationEvent, len(src))
 	copy(cp, src)
 	return cp
+}
+
+// countRecentLiquidations returns the number of liquidation events within the
+// configured time window. Caller must hold liquidationsMu.
+func (c *Connector) countRecentLiquidations(symbol string, now time.Time) int {
+	cutoff := now.Add(-time.Duration(c.config.LiquidationWindowSecs) * time.Second)
+	count := 0
+	for _, e := range c.liquidations[symbol] {
+		if e.Timestamp.After(cutoff) {
+			count++
+		}
+	}
+	return count
+}
+
+// pruneLiquidations removes expired events and updates the flag for all symbols.
+func (c *Connector) pruneLiquidations() {
+	now := time.Now()
+	cutoff := now.Add(-time.Duration(c.config.LiquidationWindowSecs) * time.Second)
+
+	c.liquidationsMu.Lock()
+	for symbol, events := range c.liquidations {
+		pruned := events[:0]
+		for _, e := range events {
+			if e.Timestamp.After(cutoff) {
+				pruned = append(pruned, e)
+			}
+		}
+		c.liquidations[symbol] = pruned
+
+		recentCount := len(pruned)
+		c.state.UpdateBinancePerps(symbol, func(s *state.BinancePerpsState) {
+			s.LiquidationFlag = recentCount >= 3
+		})
+	}
+	c.liquidationsMu.Unlock()
 }
 
 func (c *Connector) checkStaleness() {

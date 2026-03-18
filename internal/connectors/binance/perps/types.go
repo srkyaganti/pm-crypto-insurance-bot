@@ -9,8 +9,9 @@ type Config struct {
 	Symbols         []string
 	SymbolToKey     map[string]string // uppercase binance symbol -> canonical (e.g. "BTCUSDT" -> "BTC")
 	WsURL           string
-	StaleThreshold  time.Duration
-	MaxLiquidations int
+	StaleThreshold        time.Duration
+	MaxLiquidations       int
+	LiquidationWindowSecs int // only count liquidations within this window; 0 = 60s default
 }
 
 type HealthStatus struct {
