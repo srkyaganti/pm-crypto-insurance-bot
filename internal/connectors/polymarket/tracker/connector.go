@@ -222,24 +222,46 @@ func (c *Connector) Health() error {
 }
 
 func (c *Connector) getChainlinkPriceAtTimestamp(ctx context.Context, feedID string, timestamp uint64) (float64, error) {
-	report, err := c.chainlinkClient.GetReportAtTimestampForFeed(ctx, feedID, timestamp)
-	if err != nil {
-		return 0, fmt.Errorf("get chainlink report: %w", err)
+	const maxAttempts = 4
+	const retryDelay = 500 * time.Millisecond
+
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-time.After(retryDelay):
+			}
+			c.logger.Warn().
+				Err(lastErr).
+				Int("attempt", attempt+1).
+				Uint64("timestamp", timestamp).
+				Str("feed_id", feedID).
+				Msg("tracker: retrying chainlink report fetch")
+		}
+
+		rep, err := c.chainlinkClient.GetReportAtTimestampForFeed(ctx, feedID, timestamp)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if rep == nil {
+			lastErr = fmt.Errorf("nil report returned")
+			continue
+		}
+
+		price := c.extractPriceFromReport(rep)
+		c.logger.Debug().
+			Uint64("timestamp", timestamp).
+			Float64("price", price).
+			Str("feed_id", feedID).
+			Int("attempt", attempt+1).
+			Msg("tracker: fetched chainlink price")
+		return price, nil
 	}
 
-	if report == nil {
-		return 0, fmt.Errorf("nil report returned")
-	}
-
-	price := c.extractPriceFromReport(report)
-
-	c.logger.Debug().
-		Uint64("timestamp", timestamp).
-		Float64("price", price).
-		Str("feed_id", feedID).
-		Msg("tracker: fetched chainlink price")
-
-	return price, nil
+	return 0, fmt.Errorf("get chainlink report after %d attempts: %w", maxAttempts, lastErr)
 }
 
 func (c *Connector) extractPriceFromReport(reportResp *streams.ReportResponse) float64 {

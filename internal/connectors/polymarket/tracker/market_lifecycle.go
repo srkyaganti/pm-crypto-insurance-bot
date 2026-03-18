@@ -172,24 +172,28 @@ func (c *Connector) handleMarketEnd(slug string) {
 	c.mu.Unlock()
 
 	endTimestamp := uint64(activeMarket.EndTime.Unix())
-	endPrice, err := c.getChainlinkPriceAtTimestamp(c.ctx, activeMarket.FeedID, endTimestamp)
-	if err != nil {
+	endPrice, endPriceErr := c.getChainlinkPriceAtTimestamp(c.ctx, activeMarket.FeedID, endTimestamp)
+	if endPriceErr != nil {
 		c.logger.Error().
-			Err(err).
+			Err(endPriceErr).
 			Uint64("timestamp", endTimestamp).
-			Msg("tracker: failed to get chainlink end price - using 0")
+			Msg("tracker: failed to get chainlink end price after retries")
 		endPrice = 0
 	}
 
-	priceChange := endPrice - activeMarket.StartPrice
+	priceChange := 0.0
 	priceChangePct := 0.0
-	if activeMarket.StartPrice > 0 {
-		priceChangePct = (priceChange / activeMarket.StartPrice) * 100
-	}
-
-	winningOutcome := "no"
-	if priceChange > 0 {
-		winningOutcome = "yes"
+	winningOutcome := "unknown"
+	if endPriceErr == nil {
+		priceChange = endPrice - activeMarket.StartPrice
+		if activeMarket.StartPrice > 0 {
+			priceChangePct = (priceChange / activeMarket.StartPrice) * 100
+		}
+		if priceChange >= 0 {
+			winningOutcome = "yes"
+		} else {
+			winningOutcome = "no"
+		}
 	}
 
 	pmState := c.state.GetPolymarket()
