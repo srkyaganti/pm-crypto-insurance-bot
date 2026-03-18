@@ -8,10 +8,23 @@ type Config struct {
 	BinanceSpot  BinanceSpotConfig  `yaml:"binance_spot"`
 	BinancePerps BinancePerpsConfig `yaml:"binance_perps"`
 	Polymarket   PolymarketConfig   `yaml:"polymarket"`
+	Strategy     StrategyConfig     `yaml:"strategy"`
 	Risk         RiskConfig         `yaml:"risk"`
 	Persistence  PersistenceConfig  `yaml:"persistence"`
 	Sampler      SamplerConfig      `yaml:"sampler"`
 	HTTPServer   HTTPServerConfig   `yaml:"http_server"`
+}
+
+type StrategyConfig struct {
+	Enabled                   bool    `yaml:"enabled"`
+	EntryWindowMinSecs        int     `yaml:"entry_window_min_secs"`
+	EntryWindowMaxSecs        int     `yaml:"entry_window_max_secs"`
+	MinPMConfidence           float64 `yaml:"min_pm_confidence"`
+	MaxCLBinanceDivergencePct float64 `yaml:"max_cl_binance_divergence_pct"`
+	DepthSafetyMultiplier     float64 `yaml:"depth_safety_multiplier"`
+	MinDepthBTC               float64 `yaml:"min_depth_btc"`
+	MaxSharesPerTrade         int     `yaml:"max_shares_per_trade"`
+	MaxConcurrentPositions    int     `yaml:"max_concurrent_positions"`
 }
 
 type PolymarketMarketConfig struct {

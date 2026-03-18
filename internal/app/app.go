@@ -7,6 +7,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/config"
+	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/engine"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/httpserver"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/binance/perps"
@@ -31,6 +32,7 @@ type App struct {
 	connectors  []connectors.Connector
 	trackerConn   *tracker.Connector
 	chainlinkConn *chainlink.Connector
+	decisionEngine *engine.Engine
 	running       bool
 }
 
@@ -75,6 +77,11 @@ func New(cfgPath string) (*App, error) {
 
 	if err := app.initializeConnectors(logger); err != nil {
 		return nil, fmt.Errorf("failed to initialize connectors: %w", err)
+	}
+
+	if cfg.Strategy.Enabled && app.trackerConn != nil {
+		engineLogger := logging.Component(logger, "engine")
+		app.decisionEngine = engine.NewEngine(app.state, app.trackerConn, &cfg.Strategy, app.persistence, engineLogger)
 	}
 
 	return app, nil
@@ -362,6 +369,16 @@ func (a *App) runLoop() error {
 	ctx := a.supervisor.Context()
 
 	a.logger.Info().Msg("entering main run loop")
+
+	if a.decisionEngine != nil {
+		a.supervisor.Add(1)
+		go func() {
+			defer a.supervisor.Done()
+			if err := a.decisionEngine.Run(ctx); err != nil {
+				a.logger.Error().Err(err).Msg("decision engine error")
+			}
+		}()
+	}
 
 	<-ctx.Done()
 

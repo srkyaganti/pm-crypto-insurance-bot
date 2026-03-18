@@ -23,14 +23,22 @@ func (c *Connector) fetchAndRegisterMarket(slug, prefix string, window int) ([]s
 	endTime := startTime.Add(duration)
 
 	startTimestamp := uint64(startTime.Unix())
-	startPrice, err := c.getChainlinkPriceAtTimestamp(c.ctx, feedID, startTimestamp)
-	if err != nil {
-		c.logger.Error().
-			Err(err).
-			Uint64("timestamp", startTimestamp).
-			Str("feed_id", feedID).
-			Msg("tracker: failed to get chainlink start price")
-		startPrice = 0
+
+	// If startTime is in the past (>5s ago), fetch immediately.
+	// Otherwise defer: the pre-scheduler fires 10s before start, so the timestamp
+	// would be rejected by Chainlink as "in the future".
+	var startPrice float64
+	fetchDeadline := startTime.Add(5 * time.Second)
+	if time.Now().After(fetchDeadline) {
+		var err error
+		startPrice, err = c.getChainlinkPriceAtTimestamp(c.ctx, feedID, startTimestamp)
+		if err != nil {
+			c.logger.Error().
+				Err(err).
+				Uint64("timestamp", startTimestamp).
+				Str("feed_id", feedID).
+				Msg("tracker: failed to get chainlink start price")
+		}
 	}
 
 	activeMarket := &ActiveMarket{
@@ -56,6 +64,29 @@ func (c *Connector) fetchAndRegisterMarket(slug, prefix string, window int) ([]s
 	c.mu.Lock()
 	c.activeMarkets[slug] = activeMarket
 	c.mu.Unlock()
+
+	// If start price was deferred, fetch it in the background once the timestamp is valid.
+	if startPrice == 0 && time.Now().Before(fetchDeadline) {
+		go func() {
+			delay := time.Until(fetchDeadline)
+			select {
+			case <-c.ctx.Done():
+				return
+			case <-time.After(delay):
+			}
+			price, err := c.getChainlinkPriceAtTimestamp(c.ctx, feedID, startTimestamp)
+			if err != nil {
+				c.logger.Error().Err(err).Str("slug", slug).Msg("tracker: failed to fetch deferred start price")
+				return
+			}
+			c.mu.Lock()
+			if am, exists := c.activeMarkets[slug]; exists {
+				am.StartPrice = price
+			}
+			c.mu.Unlock()
+			c.logger.Info().Str("slug", slug).Float64("start_price", price).Msg("tracker: updated deferred start price")
+		}()
+	}
 
 	c.logger.Info().
 		Str("slug", slug).

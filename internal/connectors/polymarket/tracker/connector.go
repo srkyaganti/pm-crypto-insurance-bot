@@ -371,6 +371,9 @@ func (c *Connector) GetActiveWindowSummaries() []ActiveWindowSummary {
 			NoMid:          noMid,
 			NoBid:          noBid,
 			NoAsk:          noAsk,
+			YesAssetID:     am.YesAssetID,
+			NoAssetID:      am.NoAssetID,
+			HasPosition:    am.MyPosition != nil,
 		})
 	}
 

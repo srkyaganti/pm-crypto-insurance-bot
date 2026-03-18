@@ -91,4 +91,7 @@ type ActiveWindowSummary struct {
 	TimeRemainingS int64
 	YesMid, YesBid, YesAsk float64
 	NoMid, NoBid, NoAsk    float64
+	YesAssetID  string
+	NoAssetID   string
+	HasPosition bool
 }
