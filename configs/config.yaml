@@ -83,9 +83,18 @@ strategy:
   enabled: true
   entry_window_min_secs: 60
   entry_window_max_secs: 120
-  min_pm_confidence: 0.90
-  max_cl_binance_divergence_pct: 0.05
-  depth_safety_multiplier: 1.5
+  min_pm_confidence:
+    BTC: 0.90
+    ETH: 0.95
+    SOL: 0.95
+  max_cl_binance_divergence_pct:
+    BTC: 0.05
+    ETH: 0.05
+    SOL: 0.05
+  depth_safety_multiplier:
+    BTC: 1.5
+    ETH: 1.5
+    SOL: 1.5
   min_depth:
     BTC: 0.1
     ETH: 3.0

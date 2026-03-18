@@ -37,6 +37,14 @@ func NewEngine(
 	}
 }
 
+// symbolFloat looks up a per-symbol value from a map. Returns 0 if symbol not found.
+func (e *Engine) symbolFloat(m map[string]float64, symbol string) float64 {
+	if v, ok := m[symbol]; ok {
+		return v
+	}
+	return 0
+}
+
 // Run starts the 500ms evaluation loop and blocks until ctx is cancelled.
 func (e *Engine) Run(ctx context.Context) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -108,12 +116,12 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 	}
 
 	// Gate 3: Polymarket is already pricing the winning side at high confidence
-	if sig.PMConfidence < e.cfg.MinPMConfidence {
+	if sig.PMConfidence < e.symbolFloat(e.cfg.MinPMConfidence, sig.Symbol) {
 		return TradeDecision{RejectReason: "gate3_pm_confidence", Signals: sig}
 	}
 
 	// Gate 4: CL and Binance agree on which side of start_price, and divergence is small
-	if !sig.CLBinanceAgree || sig.DivergencePct > e.cfg.MaxCLBinanceDivergencePct {
+	if !sig.CLBinanceAgree || sig.DivergencePct > e.symbolFloat(e.cfg.MaxCLBinanceDivergencePct, sig.Symbol) {
 		return TradeDecision{RejectReason: "gate4_cl_binance_agreement", Signals: sig}
 	}
 
@@ -126,10 +134,10 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 	if gapAbs < 0 {
 		gapAbs = -gapAbs
 	}
-	if gapAbs < e.cfg.DepthSafetyMultiplier*sig.ExpectedMove {
+	if gapAbs < e.symbolFloat(e.cfg.DepthSafetyMultiplier, sig.Symbol)*sig.ExpectedMove {
 		return TradeDecision{RejectReason: "gate5_gap_too_small", Signals: sig}
 	}
-	if sig.LiquidityToFlip < e.cfg.MinDepth[sig.Symbol] {
+	if sig.LiquidityToFlip < e.symbolFloat(e.cfg.MinDepth, sig.Symbol) {
 		return TradeDecision{RejectReason: "gate5_depth_too_thin", Signals: sig}
 	}
 
