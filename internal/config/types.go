@@ -22,7 +22,7 @@ type StrategyConfig struct {
 	MinPMConfidence           float64 `yaml:"min_pm_confidence"`
 	MaxCLBinanceDivergencePct float64 `yaml:"max_cl_binance_divergence_pct"`
 	DepthSafetyMultiplier     float64 `yaml:"depth_safety_multiplier"`
-	MinDepthBTC               float64 `yaml:"min_depth_btc"`
+	MinDepth                  map[string]float64 `yaml:"min_depth"` // per-symbol minimum depth in native units (e.g. BTC, ETH, SOL)
 	MaxSharesPerTrade         int     `yaml:"max_shares_per_trade"`
 	MaxConcurrentPositions    int     `yaml:"max_concurrent_positions"`
 }

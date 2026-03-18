@@ -129,7 +129,7 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 	if gapAbs < e.cfg.DepthSafetyMultiplier*sig.ExpectedMove {
 		return TradeDecision{RejectReason: "gate5_gap_too_small", Signals: sig}
 	}
-	if sig.LiquidityToFlip < e.cfg.MinDepthBTC {
+	if sig.LiquidityToFlip < e.cfg.MinDepth[sig.Symbol] {
 		return TradeDecision{RejectReason: "gate5_depth_too_thin", Signals: sig}
 	}
 

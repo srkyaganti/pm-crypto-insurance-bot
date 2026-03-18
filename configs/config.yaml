@@ -86,7 +86,10 @@ strategy:
   min_pm_confidence: 0.90
   max_cl_binance_divergence_pct: 0.05
   depth_safety_multiplier: 1.5
-  min_depth_btc: 0.1
+  min_depth:
+    BTC: 0.1
+    ETH: 3.0
+    SOL: 50.0
   max_shares_per_trade: 200
   max_concurrent_positions: 5
 
