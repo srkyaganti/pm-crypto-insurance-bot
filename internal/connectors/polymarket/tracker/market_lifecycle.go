@@ -8,18 +8,14 @@ import (
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/persistence"
 )
 
-func (c *Connector) fetchAndSubscribe(slug, prefix string, window int) error {
-	c.logger.Info().
-		Str("slug", slug).
-		Str("prefix", prefix).
-		Int("window", window).
-		Msg("tracker: fetching and subscribing to market")
-
+// fetchAndRegisterMarket fetches market data and registers it as active, returning asset IDs.
+// Does NOT subscribe to the WS — caller is responsible for batching subscriptions.
+func (c *Connector) fetchAndRegisterMarket(slug, prefix string, window int) ([]string, error) {
 	feedID := c.prefixToFeedID[prefix]
 
 	marketData, err := c.gammaClient.GetMarketBySlug(c.ctx, slug)
 	if err != nil {
-		return fmt.Errorf("fetch market from gamma: %w", err)
+		return nil, fmt.Errorf("fetch market from gamma: %w", err)
 	}
 
 	startTime := marketData.WindowStart
@@ -44,6 +40,7 @@ func (c *Connector) fetchAndSubscribe(slug, prefix string, window int) error {
 		ConditionID: marketData.ConditionID,
 		WindowType:  window,
 		FeedID:      feedID,
+		Symbol:      c.prefixToSymbol[prefix],
 		Prefix:      prefix,
 		StartTime:   startTime,
 		EndTime:     endTime,
@@ -51,15 +48,7 @@ func (c *Connector) fetchAndSubscribe(slug, prefix string, window int) error {
 		PaperTrades: []PaperTrade{},
 	}
 
-	if err := c.marketConnector.SubscribeMany([]string{
-		activeMarket.YesAssetID,
-		activeMarket.NoAssetID,
-	}); err != nil {
-		return fmt.Errorf("subscribe to market: %w", err)
-	}
-
 	timeUntilEnd := time.Until(endTime)
-
 	activeMarket.EndTimer = time.AfterFunc(timeUntilEnd, func() {
 		c.handleMarketEnd(slug)
 	})
@@ -78,9 +67,35 @@ func (c *Connector) fetchAndSubscribe(slug, prefix string, window int) error {
 		Float64("chainlink_start_price", startPrice).
 		Str("yes_asset", activeMarket.YesAssetID).
 		Str("no_asset", activeMarket.NoAssetID).
-		Msg("tracker: successfully subscribed to market with end timer set")
+		Msg("tracker: registered market")
 
 	go c.preScheduleFutureWindows(prefix, window, startTime)
+
+	return []string{activeMarket.YesAssetID, activeMarket.NoAssetID}, nil
+}
+
+// fetchAndSubscribe fetches a market and subscribes by reconnecting the WS.
+// Used for dynamically added markets (pre-scheduled future windows).
+func (c *Connector) fetchAndSubscribe(slug, prefix string, window int) error {
+	c.logger.Info().
+		Str("slug", slug).
+		Str("prefix", prefix).
+		Int("window", window).
+		Msg("tracker: fetching and subscribing to market")
+
+	assetIDs, err := c.fetchAndRegisterMarket(slug, prefix, window)
+	if err != nil {
+		return err
+	}
+
+	// Track the new assets in the subscription manager
+	if err := c.marketConnector.SubscribeMany(assetIDs); err != nil {
+		return fmt.Errorf("subscribe to market: %w", err)
+	}
+
+	// Polymarket WS only accepts subscriptions on connect, so reconnect
+	// to pick up the new assets via ResubscribeAll.
+	c.marketConnector.Reconnect()
 
 	return nil
 }

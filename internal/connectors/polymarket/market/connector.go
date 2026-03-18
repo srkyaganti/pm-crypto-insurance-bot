@@ -546,3 +546,8 @@ func (c *Connector) UnsubscribeMany(assetIDs []string) error {
 func (c *Connector) GetCurrentSubscriptions() []string {
 	return c.wsClient.GetCurrentSubscriptions()
 }
+
+// Reconnect schedules a debounced WS reconnection so new subscriptions take effect.
+func (c *Connector) Reconnect() {
+	c.wsClient.ScheduleReconnect()
+}

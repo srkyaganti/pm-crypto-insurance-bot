@@ -81,3 +81,14 @@ type TrackerConfig struct {
 	PreScheduleWindows int
 	CustomFeatures     bool
 }
+
+type ActiveWindowSummary struct {
+	Slug           string
+	Symbol         string
+	WindowMin      int
+	StartPrice     float64
+	EndTime        time.Time
+	TimeRemainingS int64
+	YesMid, YesBid, YesAsk float64
+	NoMid, NoBid, NoAsk    float64
+}

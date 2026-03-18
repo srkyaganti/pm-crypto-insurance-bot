@@ -30,6 +30,7 @@ type AggTradeEvent struct {
 	Quantity     string `json:"q"`
 	TradeTime    int64  `json:"T"`
 	IsBuyerMaker bool   `json:"m"`
+	Ignore       bool   `json:"M"` // prevents "M" from case-insensitively overwriting "m"
 }
 
 type AggTradeData struct {

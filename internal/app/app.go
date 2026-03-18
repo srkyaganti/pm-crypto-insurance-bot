@@ -17,6 +17,7 @@ import (
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/lifecycle"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/logging"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/persistence"
+	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/sampler"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/state"
 )
 
@@ -27,6 +28,7 @@ type App struct {
 	state       *state.StateStore
 	persistence *persistence.Writer
 	connectors  []connectors.Connector
+	trackerConn *tracker.Connector
 	running     bool
 }
 
@@ -195,6 +197,7 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 
 		prefixToFeedID := a.config.PrefixToFeedID()
 		prefixToWindows := a.config.PrefixToWindows()
+		prefixToSymbol := a.config.PrefixToSymbol()
 
 		gammaClient := gamma.NewClient(gamma.ClientConfig{
 			BaseURL: a.config.Polymarket.GammaURL,
@@ -212,11 +215,13 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 			trackerCfg,
 			prefixToFeedID,
 			prefixToWindows,
+			prefixToSymbol,
 			a.state,
 			a.persistence,
 			logger,
 		)
 		a.connectors = append(a.connectors, trackerConnector)
+		a.trackerConn = trackerConnector.(*tracker.Connector)
 	}
 
 	a.logger.Info().
@@ -258,6 +263,41 @@ func (a *App) Run() error {
 	if err := a.startConnectors(); err != nil {
 		a.logger.Error().Err(err).Msg("failed to start connectors")
 		return err
+	}
+
+	if a.config.Sampler.Enabled {
+		ctx := a.supervisor.Context()
+		getWindows := func() []sampler.WindowSummary {
+			if a.trackerConn == nil {
+				return nil
+			}
+			sums := a.trackerConn.GetActiveWindowSummaries()
+			out := make([]sampler.WindowSummary, len(sums))
+			for i, s := range sums {
+				out[i] = sampler.WindowSummary{
+					Slug:           s.Slug,
+					Symbol:         s.Symbol,
+					WindowMin:      s.WindowMin,
+					StartPrice:     s.StartPrice,
+					EndTime:        s.EndTime,
+					TimeRemainingS: s.TimeRemainingS,
+					YesMid:         s.YesMid,
+					YesBid:         s.YesBid,
+					YesAsk:         s.YesAsk,
+					NoMid:          s.NoMid,
+					NoBid:          s.NoBid,
+					NoAsk:          s.NoAsk,
+				}
+			}
+			return out
+		}
+		interval := time.Duration(a.config.Sampler.IntervalSecs) * time.Second
+		sm, err := sampler.New(a.state, getWindows, a.config.Symbols(), interval, a.config.Sampler.OutputPath, a.logger)
+		if err != nil {
+			return fmt.Errorf("failed to create sampler: %w", err)
+		}
+		sm.Start(ctx)
+		defer sm.Stop()
 	}
 
 	a.logSystemEvent("application_started", map[string]interface{}{

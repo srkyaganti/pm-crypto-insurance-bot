@@ -216,7 +216,7 @@ func bigIntToFloat(bi *big.Int) float64 {
 		return 0
 	}
 	f, _ := bi.Float64()
-	return f / 1e8
+	return f / 1e18
 }
 
 func (c *Connector) Stop() error {

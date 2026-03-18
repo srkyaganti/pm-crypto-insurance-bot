@@ -8,6 +8,8 @@ import (
 
 	"github.com/rs/zerolog"
 	streams "github.com/smartcontractkit/data-streams-sdk/go"
+	"github.com/smartcontractkit/data-streams-sdk/go/report"
+	v3 "github.com/smartcontractkit/data-streams-sdk/go/report/v3"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/chainlink"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/polymarket/gamma"
@@ -23,6 +25,7 @@ type Connector struct {
 
 	prefixToFeedID  map[string]string
 	prefixToWindows map[string][]int
+	prefixToSymbol  map[string]string
 
 	gammaClient     *gamma.Client
 	marketConnector *market.Connector
@@ -49,6 +52,7 @@ func NewConnector(
 	cfg *TrackerConfig,
 	prefixToFeedID map[string]string,
 	prefixToWindows map[string][]int,
+	prefixToSymbol map[string]string,
 	stateStore *state.StateStore,
 	persistWriter *persistence.Writer,
 	baseLogger *zerolog.Logger,
@@ -60,6 +64,7 @@ func NewConnector(
 		config:          cfg,
 		prefixToFeedID:  prefixToFeedID,
 		prefixToWindows: prefixToWindows,
+		prefixToSymbol:  prefixToSymbol,
 		gammaClient:     gammaClient,
 		marketConnector: marketConnector,
 		chainlinkClient: chainlinkClient,
@@ -105,6 +110,8 @@ func (c *Connector) Start(ctx context.Context) error {
 	c.ctx = ctx
 	c.cancel = cancel
 
+	// Phase 1: fetch all market data and register active markets (no WS subscribe yet)
+	var allAssetIDs []string
 	for prefix, windows := range c.prefixToWindows {
 		for _, window := range windows {
 			currentSlug := gamma.GetCurrentSlug(prefix, window)
@@ -113,15 +120,28 @@ func (c *Connector) Start(ctx context.Context) error {
 				Str("prefix", prefix).
 				Int("window", window).
 				Str("slug", currentSlug).
-				Msg("tracker: subscribing to current market window")
+				Msg("tracker: fetching current market window")
 
-			if err := c.fetchAndSubscribe(currentSlug, prefix, window); err != nil {
+			assetIDs, err := c.fetchAndRegisterMarket(currentSlug, prefix, window)
+			if err != nil {
 				c.logger.Error().
 					Err(err).
 					Str("slug", currentSlug).
-					Msg("tracker: failed to subscribe to current market")
+					Msg("tracker: failed to fetch current market")
+				continue
 			}
+			allAssetIDs = append(allAssetIDs, assetIDs...)
 		}
+	}
+
+	// Phase 2: track all assets then reconnect to subscribe them in one WS message
+	if len(allAssetIDs) > 0 {
+		if err := c.marketConnector.SubscribeMany(allAssetIDs); err != nil {
+			c.logger.Error().Err(err).Int("assets", len(allAssetIDs)).Msg("tracker: failed to track initial assets")
+		}
+		// Reconnect triggers ResubscribeAll which sends the full list on new connection
+		c.marketConnector.Reconnect()
+		c.logger.Info().Int("assets", len(allAssetIDs)).Msg("tracker: scheduled reconnect for initial subscription")
 	}
 
 	c.wg.Add(1)
@@ -222,8 +242,17 @@ func (c *Connector) getChainlinkPriceAtTimestamp(ctx context.Context, feedID str
 	return price, nil
 }
 
-func (c *Connector) extractPriceFromReport(report *streams.ReportResponse) float64 {
-	return 0.0
+func (c *Connector) extractPriceFromReport(reportResp *streams.ReportResponse) float64 {
+	decoded, err := report.Decode[v3.Data](reportResp.FullReport)
+	if err != nil {
+		c.logger.Error().Err(err).Msg("tracker: failed to decode chainlink report")
+		return 0.0
+	}
+	if decoded.Data.BenchmarkPrice == nil {
+		return 0.0
+	}
+	f, _ := decoded.Data.BenchmarkPrice.Float64()
+	return f / 1e18
 }
 
 func (c *Connector) logEvent(eventType persistence.EventType, message string, payload map[string]interface{}) {
@@ -281,6 +310,49 @@ func (c *Connector) GetStats() map[string]interface{} {
 		"total_pnl":      totalPnL,
 		"avg_pnl":        totalPnL / float64(len(c.marketHistory)),
 	}
+}
+
+func (c *Connector) GetActiveWindowSummaries() []ActiveWindowSummary {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	pmState := c.state.GetPolymarket()
+	summaries := make([]ActiveWindowSummary, 0, len(c.activeMarkets))
+
+	for _, am := range c.activeMarkets {
+		remaining := int64(time.Until(am.EndTime).Seconds())
+
+		var yesMid, yesBid, yesAsk float64
+		var noMid, noBid, noAsk float64
+
+		if ob := pmState.OrderBooks[am.YesAssetID]; ob != nil {
+			yesMid = ob.MidPrice
+			yesBid = ob.BestBid
+			yesAsk = ob.BestAsk
+		}
+		if ob := pmState.OrderBooks[am.NoAssetID]; ob != nil {
+			noMid = ob.MidPrice
+			noBid = ob.BestBid
+			noAsk = ob.BestAsk
+		}
+
+		summaries = append(summaries, ActiveWindowSummary{
+			Slug:           am.Slug,
+			Symbol:         am.Symbol,
+			WindowMin:      am.WindowType,
+			StartPrice:     am.StartPrice,
+			EndTime:        am.EndTime,
+			TimeRemainingS: remaining,
+			YesMid:         yesMid,
+			YesBid:         yesBid,
+			YesAsk:         yesAsk,
+			NoMid:          noMid,
+			NoBid:          noBid,
+			NoAsk:          noAsk,
+		})
+	}
+
+	return summaries
 }
 
 func (c *Connector) GetCurrentActiveMarkets() []string {

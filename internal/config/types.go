@@ -10,6 +10,7 @@ type Config struct {
 	Polymarket   PolymarketConfig   `yaml:"polymarket"`
 	Risk         RiskConfig         `yaml:"risk"`
 	Persistence  PersistenceConfig  `yaml:"persistence"`
+	Sampler      SamplerConfig      `yaml:"sampler"`
 }
 
 type PolymarketMarketConfig struct {
@@ -73,6 +74,12 @@ type TrackerConfig struct {
 	Enabled            bool `yaml:"enabled"`
 	PreScheduleWindows int  `yaml:"pre_schedule_windows"`
 	CustomFeatures     bool `yaml:"custom_features"`
+}
+
+type SamplerConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	OutputPath   string `yaml:"output_path"`
+	IntervalSecs int    `yaml:"interval_secs"`
 }
 
 type RiskConfig struct {
@@ -156,6 +163,15 @@ func (c *Config) PrefixToWindows() map[string][]int {
 	m := make(map[string][]int, len(c.Markets))
 	for _, mkt := range c.Markets {
 		m[mkt.Polymarket.Prefix] = mkt.Polymarket.Windows
+	}
+	return m
+}
+
+// PrefixToSymbol returns polymarket prefix -> canonical symbol (e.g. "btc-updown-" -> "BTC")
+func (c *Config) PrefixToSymbol() map[string]string {
+	m := make(map[string]string, len(c.Markets))
+	for _, mkt := range c.Markets {
+		m[mkt.Polymarket.Prefix] = mkt.Symbol
 	}
 	return m
 }

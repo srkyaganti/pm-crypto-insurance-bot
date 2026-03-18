@@ -22,7 +22,9 @@ type WSClient struct {
 	stopCh    chan struct{}
 	stopOnce  sync.Once
 
-	subManager *SubscriptionManager
+	subManager     *SubscriptionManager
+	reconnectMu    sync.Mutex
+	reconnectTimer *time.Timer
 
 	onBook           func(*BookEvent)
 	onPriceChange    func(*PriceChangeEvent)
@@ -106,9 +108,9 @@ func (w *WSClient) OnDisconnect(fn func(error)) {
 
 func (w *WSClient) Connect(ctx context.Context) error {
 	w.connMu.Lock()
-	defer w.connMu.Unlock()
 
 	if w.connected.Load() {
+		w.connMu.Unlock()
 		return nil
 	}
 
@@ -119,6 +121,7 @@ func (w *WSClient) Connect(ctx context.Context) error {
 	headers := http.Header{}
 	conn, resp, err := w.dialer.Dial(w.config.WsURL, headers)
 	if err != nil {
+		w.connMu.Unlock()
 		if resp != nil {
 			w.logger.Error().
 				Err(err).
@@ -130,11 +133,18 @@ func (w *WSClient) Connect(ctx context.Context) error {
 
 	w.conn = conn
 	w.connected.Store(true)
+	w.connMu.Unlock()
 
 	w.logger.Info().Msg("polymarket market: connected to data stream")
 
 	if w.onConnect != nil {
 		w.onConnect()
+	}
+
+	// Re-subscribe all tracked assets (must be outside connMu to avoid deadlock
+	// since sendSubscription also acquires connMu)
+	if err := w.subManager.ResubscribeAll(); err != nil {
+		w.logger.Error().Err(err).Msg("polymarket market: failed to resubscribe after connect")
 	}
 
 	return nil
@@ -215,9 +225,10 @@ func (w *WSClient) handleMessage(data []byte) {
 	dataStr := string(data)
 	if !json.Valid(data) {
 		if dataStr == "INVALID OPERATION" || dataStr == "INVALID" {
-			w.logger.Error().Str("message", dataStr).Msg("polymarket market: received protocol error from server")
+			subs := w.subManager.GetCurrentSubscriptions()
+			w.logger.Error().Str("error_text", dataStr).Int("sub_count", len(subs)).Msg("polymarket market: received protocol error from server")
 		} else {
-			w.logger.Warn().Str("message", dataStr).Msg("polymarket market: received non-JSON message")
+			w.logger.Warn().Str("raw_text", dataStr).Msg("polymarket market: received non-JSON message")
 		}
 		return
 	}
@@ -411,6 +422,26 @@ func (w *WSClient) Stop() {
 
 func (w *WSClient) IsConnected() bool {
 	return w.connected.Load()
+}
+
+// ScheduleReconnect triggers a reconnect after a short debounce window,
+// allowing multiple rapid SubscribeMany calls to batch into one reconnect.
+func (w *WSClient) ScheduleReconnect() {
+	w.reconnectMu.Lock()
+	defer w.reconnectMu.Unlock()
+
+	if w.reconnectTimer != nil {
+		w.reconnectTimer.Stop()
+	}
+
+	w.reconnectTimer = time.AfterFunc(2*time.Second, func() {
+		w.logger.Info().Msg("polymarket market: reconnecting for subscription update")
+		w.connMu.Lock()
+		if w.conn != nil {
+			w.conn.Close()
+		}
+		w.connMu.Unlock()
+	})
 }
 
 func (w *WSClient) Subscribe(assetID string) error {
