@@ -237,7 +237,33 @@ def make_figure(df, windows_data, symbol):
         legend=dict(orientation="v", x=1.01, y=1),
         margin=dict(r=180),
     )
-    fig.update_xaxes(title_text="Time", row=3, col=1)
+
+    # Tight x-axis range based on actual data + range selector for zooming
+    all_ts = list(df["ts"]) if not df.empty else []
+    for data in windows_data.values():
+        all_ts.extend(data["ts"])
+    if all_ts:
+        ts_min = min(all_ts)
+        ts_max = max(all_ts)
+        pad = (ts_max - ts_min) * 0.02 if ts_max > ts_min else pd.Timedelta(seconds=5)
+        for row in range(1, 4):
+            fig.update_xaxes(range=[ts_min - pad, ts_max + pad], row=row, col=1)
+
+    fig.update_xaxes(
+        title_text="Time",
+        rangeslider=dict(visible=True, thickness=0.06),
+        rangeselector=dict(
+            buttons=[
+                dict(count=30, label="30s", step="second", stepmode="backward"),
+                dict(count=1, label="1m", step="minute", stepmode="backward"),
+                dict(count=2, label="2m", step="minute", stepmode="backward"),
+                dict(count=5, label="5m", step="minute", stepmode="backward"),
+                dict(step="all", label="All"),
+            ],
+            x=0, y=-0.15,
+        ),
+        row=3, col=1,
+    )
     fig.update_yaxes(title_text="Price", row=1, col=1)
     fig.update_yaxes(title_text="Mid Price", row=2, col=1)
     fig.update_yaxes(title_text="Imbalance", row=3, col=1)
