@@ -12,7 +12,7 @@ import (
 
 func ExampleBasicUsage() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	stateStore := state.NewStateStore()
+	stateStore := state.NewStateStore([]string{})
 
 	cfg := &Config{
 		CustomFeatureEnabled: true,
@@ -54,7 +54,7 @@ func ExampleBasicUsage() {
 
 func ExampleDynamicSubscriptions() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	stateStore := state.NewStateStore()
+	stateStore := state.NewStateStore([]string{})
 
 	cfg := &Config{
 		CustomFeatureEnabled: true,
@@ -89,7 +89,7 @@ func ExampleDynamicSubscriptions() {
 
 func ExampleMultiMarketMonitoring() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	stateStore := state.NewStateStore()
+	stateStore := state.NewStateStore([]string{})
 
 	cfg := &Config{
 		CustomFeatureEnabled: true,
@@ -140,7 +140,7 @@ func ExampleMultiMarketMonitoring() {
 
 func ExampleHealthMonitoring() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-	stateStore := state.NewStateStore()
+	stateStore := state.NewStateStore([]string{})
 
 	cfg := &Config{
 		CustomFeatureEnabled: true,

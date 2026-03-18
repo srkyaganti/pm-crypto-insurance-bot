@@ -3,13 +3,15 @@ package state
 import (
 	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 type AppState struct {
 	Meta         MetaState
-	Chainlink    ChainlinkState
-	BinanceSpot  BinanceSpotState
-	BinancePerps BinancePerpsState
+	Chainlink    map[string]*ChainlinkState
+	BinanceSpot  map[string]*BinanceSpotState
+	BinancePerps map[string]*BinancePerpsState
 	Polymarket   PolymarketState
 	Risk         RiskState
 }
@@ -147,10 +149,15 @@ type PolymarketState struct {
 	IsStale          bool
 }
 
+type SymbolFreshness struct {
+	ChainlinkFresh bool
+	BinanceFresh   bool
+	LastUpdate     time.Time
+}
+
 type RiskState struct {
 	FeedsHealthy    bool
-	ChainlinkFresh  bool
-	BinanceFresh    bool
+	SymbolFreshness map[string]*SymbolFreshness
 	PolymarketFresh bool
 	MaxMove30sPct   float64
 	MaxMove60sPct   float64
@@ -163,41 +170,58 @@ type StateVersion struct {
 	SchemaVersion string
 }
 
-const CurrentSchemaVersion = "v1.0.0"
+const CurrentSchemaVersion = "v2.0.0"
 
 type StateStore struct {
-	mu    sync.RWMutex
-	state AppState
+	mu      sync.RWMutex
+	state   AppState
+	symbols map[string]bool
 }
 
-func NewStateStore() *StateStore {
+func NewStateStore(symbols []string) *StateStore {
 	now := time.Now()
+
+	chainlink := make(map[string]*ChainlinkState, len(symbols))
+	binanceSpot := make(map[string]*BinanceSpotState, len(symbols))
+	binancePerps := make(map[string]*BinancePerpsState, len(symbols))
+	symbolFreshness := make(map[string]*SymbolFreshness, len(symbols))
+	symbolSet := make(map[string]bool, len(symbols))
+
+	for _, sym := range symbols {
+		symbolSet[sym] = true
+		chainlink[sym] = &ChainlinkState{
+			Ticks: RingBuffer{
+				Buffer:   make([]PriceTick, 0, 180),
+				Capacity: 180,
+			},
+		}
+		binanceSpot[sym] = &BinanceSpotState{
+			Symbol: sym,
+			OrderBook: OrderBookSnapshot{
+				Bids: make([]OrderLevel, 0, 20),
+				Asks: make([]OrderLevel, 0, 20),
+			},
+			TradeFlow: TradeFlowState{
+				LastRotate: now,
+			},
+		}
+		binancePerps[sym] = &BinancePerpsState{
+			Symbol:             sym,
+			RecentLiquidations: make([]LiquidationEvent, 0, 100),
+		}
+		symbolFreshness[sym] = &SymbolFreshness{}
+	}
+
 	return &StateStore{
+		symbols: symbolSet,
 		state: AppState{
 			Meta: MetaState{
 				StartedAt: now,
 				IsHealthy: true,
 			},
-			Chainlink: ChainlinkState{
-				Ticks: RingBuffer{
-					Buffer:   make([]PriceTick, 0, 180),
-					Capacity: 180,
-					Index:    0,
-					Full:     false,
-				},
-			},
-			BinanceSpot: BinanceSpotState{
-				OrderBook: OrderBookSnapshot{
-					Bids: make([]OrderLevel, 0, 20),
-					Asks: make([]OrderLevel, 0, 20),
-				},
-				TradeFlow: TradeFlowState{
-					LastRotate: time.Now(),
-				},
-			},
-			BinancePerps: BinancePerpsState{
-				RecentLiquidations: make([]LiquidationEvent, 0, 100),
-			},
+			Chainlink:    chainlink,
+			BinanceSpot:  binanceSpot,
+			BinancePerps: binancePerps,
 			Polymarket: PolymarketState{
 				OrderBooks:       make(map[string]*PMOrderBook),
 				MarketAssets:     make(map[string]*MarketAssetMeta),
@@ -206,8 +230,7 @@ func NewStateStore() *StateStore {
 			},
 			Risk: RiskState{
 				FeedsHealthy:    false,
-				ChainlinkFresh:  false,
-				BinanceFresh:    false,
+				SymbolFreshness: symbolFreshness,
 				PolymarketFresh: false,
 				TradingDisabled: true,
 				LastRiskUpdate:  now,
@@ -228,22 +251,31 @@ func (s *StateStore) GetMeta() MetaState {
 	return s.state.Meta
 }
 
-func (s *StateStore) GetChainlink() ChainlinkState {
+func (s *StateStore) GetChainlink(symbol string) ChainlinkState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.state.Chainlink
+	if st := s.state.Chainlink[symbol]; st != nil {
+		return *st
+	}
+	return ChainlinkState{}
 }
 
-func (s *StateStore) GetBinanceSpot() BinanceSpotState {
+func (s *StateStore) GetBinanceSpot(symbol string) BinanceSpotState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.state.BinanceSpot
+	if st := s.state.BinanceSpot[symbol]; st != nil {
+		return *st
+	}
+	return BinanceSpotState{}
 }
 
-func (s *StateStore) GetBinancePerps() BinancePerpsState {
+func (s *StateStore) GetBinancePerps(symbol string) BinancePerpsState {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.state.BinancePerps
+	if st := s.state.BinancePerps[symbol]; st != nil {
+		return *st
+	}
+	return BinancePerpsState{}
 }
 
 func (s *StateStore) GetPolymarket() PolymarketState {
@@ -264,22 +296,37 @@ func (s *StateStore) UpdateMeta(fn func(*MetaState)) {
 	fn(&s.state.Meta)
 }
 
-func (s *StateStore) UpdateChainlink(fn func(*ChainlinkState)) {
+func (s *StateStore) UpdateChainlink(symbol string, fn func(*ChainlinkState)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fn(&s.state.Chainlink)
+	st := s.state.Chainlink[symbol]
+	if st == nil {
+		log.Warn().Str("symbol", symbol).Msg("state: unknown symbol for chainlink update")
+		return
+	}
+	fn(st)
 }
 
-func (s *StateStore) UpdateBinanceSpot(fn func(*BinanceSpotState)) {
+func (s *StateStore) UpdateBinanceSpot(symbol string, fn func(*BinanceSpotState)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fn(&s.state.BinanceSpot)
+	st := s.state.BinanceSpot[symbol]
+	if st == nil {
+		log.Warn().Str("symbol", symbol).Msg("state: unknown symbol for binance spot update")
+		return
+	}
+	fn(st)
 }
 
-func (s *StateStore) UpdateBinancePerps(fn func(*BinancePerpsState)) {
+func (s *StateStore) UpdateBinancePerps(symbol string, fn func(*BinancePerpsState)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	fn(&s.state.BinancePerps)
+	st := s.state.BinancePerps[symbol]
+	if st == nil {
+		log.Warn().Str("symbol", symbol).Msg("state: unknown symbol for binance perps update")
+		return
+	}
+	fn(st)
 }
 
 func (s *StateStore) UpdatePolymarket(fn func(*PolymarketState)) {
@@ -292,4 +339,15 @@ func (s *StateStore) UpdateRisk(fn func(*RiskState)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	fn(&s.state.Risk)
+}
+
+func (s *StateStore) UpdateSymbolFreshness(symbol string, fn func(*SymbolFreshness)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sf := s.state.Risk.SymbolFreshness[symbol]
+	if sf == nil {
+		log.Warn().Str("symbol", symbol).Msg("state: unknown symbol for freshness update")
+		return
+	}
+	fn(sf)
 }

@@ -9,7 +9,8 @@ type Config struct {
 	ApiSecret      string
 	RestURL        string
 	WsURL          string
-	FeedID         string
+	FeedIDs        map[string]string // symbol -> feedID hex
+	FeedIDToSymbol map[string]string // feedID hex -> symbol (reverse lookup)
 	WsHA           bool
 	WsMaxReconnect int
 	StaleThreshold time.Duration
@@ -21,6 +22,13 @@ type HealthStatus struct {
 	LastUpdate   time.Time
 	ReportsCount int64
 	Errors       int64
+	PerSymbol    map[string]*SymbolHealth
+}
+
+type SymbolHealth struct {
+	LastUpdate   time.Time
+	ReportsCount int64
+	IsStale      bool
 }
 
 type DecodedReport struct {

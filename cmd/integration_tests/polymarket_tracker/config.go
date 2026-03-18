@@ -16,10 +16,12 @@ func parseFlags() *Config {
 	flag.StringVar(&cfg.ChainlinkWsURL, "chainlink-ws-url", "", "Chainlink WebSocket URL")
 	flag.StringVar(&cfg.ChainlinkApiKey, "chainlink-api-key", "", "Chainlink API key")
 	flag.StringVar(&cfg.ChainlinkApiSecret, "chainlink-api-secret", "", "Chainlink API secret")
-	flag.StringVar(&cfg.BTCFeedID, "btc-feed-id", "", "Chainlink BTC/USD feed ID")
 
+	// Market feed configs are built from prefix + feed-id + window flags
 	var prefixes stringSlice
 	flag.Var(&prefixes, "prefix", "Market prefixes to track (repeatable, default: btc-updown-)")
+	var feedIDs stringSlice
+	flag.Var(&feedIDs, "feed-id", "Chainlink feed IDs matching prefixes (repeatable)")
 	var windows intSlice
 	flag.Var(&windows, "window", "Window sizes in minutes (repeatable, default: 5, 15)")
 
@@ -33,16 +35,26 @@ func parseFlags() *Config {
 
 	flag.Parse()
 
-	if len(prefixes) == 0 {
-		cfg.MarketPrefixes = []string{"btc-updown-"}
-	} else {
-		cfg.MarketPrefixes = prefixes
+	if len(windows) == 0 {
+		windows = intSlice{5, 15}
 	}
 
-	if len(windows) == 0 {
-		cfg.Windows = []int{5, 15}
-	} else {
-		cfg.Windows = windows
+	if len(prefixes) == 0 {
+		prefixes = stringSlice{"btc-updown-"}
+	}
+
+	// Build market feeds from flags
+	cfg.MarketFeeds = make([]MarketFeedConfig, len(prefixes))
+	for i, prefix := range prefixes {
+		feedID := ""
+		if i < len(feedIDs) {
+			feedID = string(feedIDs[i])
+		}
+		cfg.MarketFeeds[i] = MarketFeedConfig{
+			Prefix:  prefix,
+			FeedID:  feedID,
+			Windows: []int(windows),
+		}
 	}
 
 	if logInterval, err := time.ParseDuration(logIntervalStr); err == nil {
@@ -64,14 +76,19 @@ func (c *Config) Validate() error {
 	if c.ChainlinkApiSecret == "" {
 		return fmt.Errorf("chainlink-api-secret is required")
 	}
-	if c.BTCFeedID == "" {
-		return fmt.Errorf("btc-feed-id is required")
+	if len(c.MarketFeeds) == 0 {
+		return fmt.Errorf("at least one market feed is required")
 	}
-	if len(c.MarketPrefixes) == 0 {
-		return fmt.Errorf("at least one market prefix is required")
-	}
-	if len(c.Windows) == 0 {
-		return fmt.Errorf("at least one window size is required")
+	for i, mf := range c.MarketFeeds {
+		if mf.Prefix == "" {
+			return fmt.Errorf("market_feeds[%d].prefix is required", i)
+		}
+		if mf.FeedID == "" {
+			return fmt.Errorf("market_feeds[%d].feed_id is required (prefix: %s)", i, mf.Prefix)
+		}
+		if len(mf.Windows) == 0 {
+			return fmt.Errorf("market_feeds[%d].windows must have at least one entry (prefix: %s)", i, mf.Prefix)
+		}
 	}
 	return nil
 }

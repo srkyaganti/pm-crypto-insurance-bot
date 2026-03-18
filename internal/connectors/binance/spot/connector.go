@@ -3,7 +3,6 @@ package spot
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -79,13 +78,9 @@ func (c *Connector) Start(ctx context.Context) error {
 		wsURL = "wss://stream.binance.com:9443"
 	}
 
-	restURL := c.config.RestURL
-	if restURL == "" {
-		restURL = "https://api.binance.com"
-	}
-
 	wsConfig := &Config{
-		Symbol:         strings.ToLower(c.config.Symbol),
+		Symbols:        c.config.Symbols,
+		SymbolToKey:    c.config.SymbolToKey,
 		WsURL:          wsURL,
 		DepthSpeed:     c.config.DepthSpeed,
 		MaxDepthLevels: c.config.MaxDepthLevels,
@@ -99,8 +94,8 @@ func (c *Connector) Start(ctx context.Context) error {
 	c.wsClient.OnConnect(func() {
 		c.health.IsConnected = true
 		c.logEvent(persistence.EventConnector, "connected", map[string]interface{}{
-			"symbol":  c.config.Symbol,
-			"streams": []string{"depth20@100ms", "aggTrade"},
+			"symbols": c.config.Symbols,
+			"streams": len(c.config.Symbols) * 2,
 		})
 	})
 	c.wsClient.OnDisconnect(func(err error) {
@@ -110,13 +105,16 @@ func (c *Connector) Start(ctx context.Context) error {
 		})
 	})
 
-	c.state.UpdateBinanceSpot(func(s *state.BinanceSpotState) {
-		s.Symbol = c.config.Symbol
-		s.IsStale = true
-	})
+	for symbol := range c.config.SymbolToKey {
+		canonical := c.config.SymbolToKey[symbol]
+		c.state.UpdateBinanceSpot(canonical, func(s *state.BinanceSpotState) {
+			s.Symbol = symbol
+			s.IsStale = true
+		})
+	}
 
 	c.logEvent(persistence.EventSystem, "connector_starting", map[string]interface{}{
-		"symbol":          c.config.Symbol,
+		"symbols":         c.config.Symbols,
 		"depth_speed":     c.config.DepthSpeed,
 		"max_levels":      c.config.MaxDepthLevels,
 		"stale_threshold": c.config.StaleThreshold.String(),
@@ -153,14 +151,12 @@ func (c *Connector) Start(ctx context.Context) error {
 	return nil
 }
 
-func (c *Connector) handleDepthSnapshot(data *DepthData) {
+func (c *Connector) handleDepthSnapshot(symbol string, data *DepthData) {
 	c.health.DepthUpdates++
 	c.health.LastDepthUpdate = time.Now()
 	c.health.IsStale = false
 
-	c.state.UpdateBinanceSpot(func(s *state.BinanceSpotState) {
-		s.Symbol = c.config.Symbol
-
+	c.state.UpdateBinanceSpot(symbol, func(s *state.BinanceSpotState) {
 		s.OrderBook.Bids = make([]state.OrderLevel, 0, len(data.Bids))
 		cumBid := 0.0
 		for _, bid := range data.Bids {
@@ -200,17 +196,17 @@ func (c *Connector) handleDepthSnapshot(data *DepthData) {
 		s.IsStale = false
 	})
 
-	c.state.UpdateRisk(func(s *state.RiskState) {
-		s.BinanceFresh = true
-		s.LastRiskUpdate = time.Now()
+	c.state.UpdateSymbolFreshness(symbol, func(sf *state.SymbolFreshness) {
+		sf.BinanceFresh = true
+		sf.LastUpdate = time.Now()
 	})
 }
 
-func (c *Connector) handleAggTrade(data *AggTradeData) {
+func (c *Connector) handleAggTrade(symbol string, data *AggTradeData) {
 	c.health.AggTradeUpdates++
 	c.health.LastAggTrade = time.Now()
 
-	c.state.UpdateBinanceSpot(func(s *state.BinanceSpotState) {
+	c.state.UpdateBinanceSpot(symbol, func(s *state.BinanceSpotState) {
 		c.updateFlowBucket(s, data)
 	})
 }
@@ -296,33 +292,35 @@ func (c *Connector) checkStaleness() {
 
 	if !c.health.IsConnected {
 		c.health.IsStale = true
-		c.markStale()
+		c.markAllStale()
 		return
 	}
 
 	if c.config.StaleThreshold > 0 {
 		timeSinceDepth := time.Since(c.health.LastDepthUpdate)
-		timeSinceAggTrade := time.Since(c.health.LastAggTrade)
 
 		if timeSinceDepth > c.config.StaleThreshold {
 			c.health.IsStale = true
-			c.markStale()
+			c.markAllStale()
 
 			c.logger.Warn().
 				Dur("depth_age", timeSinceDepth).
-				Dur("aggtrade_age", timeSinceAggTrade).
 				Msg("binance spot: feed marked as stale")
 		}
 	}
 }
 
-func (c *Connector) markStale() {
-	c.state.UpdateBinanceSpot(func(s *state.BinanceSpotState) {
-		s.IsStale = true
-	})
+func (c *Connector) markAllStale() {
+	for _, canonical := range c.config.SymbolToKey {
+		c.state.UpdateBinanceSpot(canonical, func(s *state.BinanceSpotState) {
+			s.IsStale = true
+		})
+		c.state.UpdateSymbolFreshness(canonical, func(sf *state.SymbolFreshness) {
+			sf.BinanceFresh = false
+		})
+	}
 
 	c.state.UpdateRisk(func(s *state.RiskState) {
-		s.BinanceFresh = false
 		s.FeedsHealthy = false
 	})
 }
@@ -347,13 +345,14 @@ func (c *Connector) Stop() error {
 
 	c.wg.Wait()
 
-	c.state.UpdateBinanceSpot(func(s *state.BinanceSpotState) {
-		s.IsStale = true
-	})
-
-	c.state.UpdateRisk(func(s *state.RiskState) {
-		s.BinanceFresh = false
-	})
+	for _, canonical := range c.config.SymbolToKey {
+		c.state.UpdateBinanceSpot(canonical, func(s *state.BinanceSpotState) {
+			s.IsStale = true
+		})
+		c.state.UpdateSymbolFreshness(canonical, func(sf *state.SymbolFreshness) {
+			sf.BinanceFresh = false
+		})
+	}
 
 	c.logEvent(persistence.EventSystem, "connector_stopped", nil)
 

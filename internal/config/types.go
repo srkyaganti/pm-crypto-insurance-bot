@@ -3,6 +3,7 @@ package config
 type Config struct {
 	App          AppConfig          `yaml:"app"`
 	Logging      LoggingConfig      `yaml:"logging"`
+	Markets      []MarketDefinition `yaml:"markets"`
 	Chainlink    ChainlinkConfig    `yaml:"chainlink"`
 	BinanceSpot  BinanceSpotConfig  `yaml:"binance_spot"`
 	BinancePerps BinancePerpsConfig `yaml:"binance_perps"`
@@ -11,9 +12,20 @@ type Config struct {
 	Persistence  PersistenceConfig  `yaml:"persistence"`
 }
 
+type PolymarketMarketConfig struct {
+	Prefix  string `yaml:"prefix"`
+	Windows []int  `yaml:"windows"`
+}
+
+type MarketDefinition struct {
+	Symbol          string                 `yaml:"symbol"`
+	ChainlinkFeedID string                 `yaml:"chainlink_feed_id"`
+	BinanceSymbol   string                 `yaml:"binance_symbol"`
+	Polymarket      PolymarketMarketConfig `yaml:"polymarket"`
+}
+
 type AppConfig struct {
 	Mode           string `yaml:"mode"`
-	Symbol         string `yaml:"symbol"`
 	TickIntervalMs int    `yaml:"tick_interval_ms"`
 }
 
@@ -31,13 +43,11 @@ type ChainlinkConfig struct {
 	WsURL          string `yaml:"ws_url"`
 	ApiKey         string `yaml:"api_key"`
 	ApiSecret      string `yaml:"api_secret"`
-	FeedID         string `yaml:"feed_id"`
 	WsHA           bool   `yaml:"ws_ha"`
 	WsMaxReconnect int    `yaml:"ws_max_reconnect"`
 }
 
 type BinanceSpotConfig struct {
-	Symbol     string `yaml:"symbol"`
 	WsURL      string `yaml:"ws_url"`
 	RestURL    string `yaml:"rest_url"`
 	DepthSpeed string `yaml:"depth_speed"`
@@ -45,8 +55,7 @@ type BinanceSpotConfig struct {
 }
 
 type BinancePerpsConfig struct {
-	Symbol string `yaml:"symbol"`
-	WsURL  string `yaml:"ws_url"`
+	WsURL string `yaml:"ws_url"`
 }
 
 type PolymarketConfig struct {
@@ -61,11 +70,9 @@ type PolymarketConfig struct {
 }
 
 type TrackerConfig struct {
-	Enabled            bool     `yaml:"enabled"`
-	MarketPrefixes     []string `yaml:"market_prefixes"`
-	Windows            []int    `yaml:"windows"`
-	PreScheduleWindows int      `yaml:"pre_schedule_windows"`
-	CustomFeatures     bool     `yaml:"custom_features"`
+	Enabled            bool `yaml:"enabled"`
+	PreScheduleWindows int  `yaml:"pre_schedule_windows"`
+	CustomFeatures     bool `yaml:"custom_features"`
 }
 
 type RiskConfig struct {
@@ -89,4 +96,66 @@ type PersistenceConfig struct {
 	S3Bucket         string `yaml:"s3_bucket"`
 	S3Region         string `yaml:"s3_region"`
 	S3Prefix         string `yaml:"s3_prefix"`
+}
+
+// Helper methods
+
+func (c *Config) Symbols() []string {
+	symbols := make([]string, len(c.Markets))
+	for i, m := range c.Markets {
+		symbols[i] = m.Symbol
+	}
+	return symbols
+}
+
+func (c *Config) AllChainlinkFeedIDs() []string {
+	ids := make([]string, len(c.Markets))
+	for i, m := range c.Markets {
+		ids[i] = m.ChainlinkFeedID
+	}
+	return ids
+}
+
+func (c *Config) AllBinanceSymbols() []string {
+	symbols := make([]string, len(c.Markets))
+	for i, m := range c.Markets {
+		symbols[i] = m.BinanceSymbol
+	}
+	return symbols
+}
+
+// FeedIDToSymbol returns feedID hex -> canonical symbol (e.g. "0x00..." -> "BTC")
+func (c *Config) FeedIDToSymbol() map[string]string {
+	m := make(map[string]string, len(c.Markets))
+	for _, mkt := range c.Markets {
+		m[mkt.ChainlinkFeedID] = mkt.Symbol
+	}
+	return m
+}
+
+// BinanceToSymbol returns lowercase binance symbol -> canonical symbol (e.g. "btcusdt" -> "BTC")
+func (c *Config) BinanceToSymbol() map[string]string {
+	m := make(map[string]string, len(c.Markets))
+	for _, mkt := range c.Markets {
+		m[mkt.BinanceSymbol] = mkt.Symbol
+	}
+	return m
+}
+
+// PrefixToFeedID returns polymarket prefix -> chainlink feed ID (e.g. "btc-updown-" -> "0x00...")
+func (c *Config) PrefixToFeedID() map[string]string {
+	m := make(map[string]string, len(c.Markets))
+	for _, mkt := range c.Markets {
+		m[mkt.Polymarket.Prefix] = mkt.ChainlinkFeedID
+	}
+	return m
+}
+
+// PrefixToWindows returns polymarket prefix -> window durations (e.g. "btc-updown-" -> [5, 15])
+func (c *Config) PrefixToWindows() map[string][]int {
+	m := make(map[string][]int, len(c.Markets))
+	for _, mkt := range c.Markets {
+		m[mkt.Polymarket.Prefix] = mkt.Polymarket.Windows
+	}
+	return m
 }

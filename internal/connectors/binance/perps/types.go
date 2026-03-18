@@ -6,7 +6,8 @@ import (
 )
 
 type Config struct {
-	Symbol          string
+	Symbols         []string
+	SymbolToKey     map[string]string // uppercase binance symbol -> canonical (e.g. "BTCUSDT" -> "BTC")
 	WsURL           string
 	StaleThreshold  time.Duration
 	MaxLiquidations int

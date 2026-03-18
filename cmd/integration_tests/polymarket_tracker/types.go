@@ -11,6 +11,8 @@ type ActiveMarket struct {
 	NoAssetID   string
 	ConditionID string
 	WindowType  int
+	FeedID      string
+	Prefix      string
 
 	StartTime    time.Time
 	EndTime      time.Time
@@ -47,6 +49,8 @@ type Position struct {
 type CompletedMarket struct {
 	Slug        string
 	WindowType  int
+	FeedID      string
+	Prefix      string
 	StartTime   time.Time
 	EndTime     time.Time
 	YesAssetID  string
@@ -72,6 +76,12 @@ type CompletedMarket struct {
 	Timestamp     time.Time
 }
 
+type MarketFeedConfig struct {
+	Prefix string
+	FeedID string
+	Windows []int
+}
+
 type Config struct {
 	GammaURL           string
 	MarketWsURL        string
@@ -79,10 +89,9 @@ type Config struct {
 	ChainlinkWsURL     string
 	ChainlinkApiKey    string
 	ChainlinkApiSecret string
-	BTCFeedID          string
 
-	MarketPrefixes     []string
-	Windows            []int
+	MarketFeeds        []MarketFeedConfig
+
 	PreScheduleWindows int
 	DataDir            string
 	LogInterval        time.Duration

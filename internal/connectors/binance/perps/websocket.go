@@ -31,8 +31,8 @@ type WSClient struct {
 	stopCh    chan struct{}
 	stopOnce  sync.Once
 
-	onMarkPrice   func(data *MarkPriceData)
-	onLiquidation func(data *LiquidationData)
+	onMarkPrice   func(symbol string, data *MarkPriceData)
+	onLiquidation func(symbol string, data *LiquidationData)
 	onConnect     func()
 	onDisconnect  func(err error)
 
@@ -48,11 +48,11 @@ func NewWSClient(cfg *Config, logger *zerolog.Logger) *WSClient {
 	}
 }
 
-func (w *WSClient) OnMarkPrice(fn func(data *MarkPriceData)) {
+func (w *WSClient) OnMarkPrice(fn func(symbol string, data *MarkPriceData)) {
 	w.onMarkPrice = fn
 }
 
-func (w *WSClient) OnLiquidation(fn func(data *LiquidationData)) {
+func (w *WSClient) OnLiquidation(fn func(symbol string, data *LiquidationData)) {
 	w.onLiquidation = fn
 }
 
@@ -70,11 +70,27 @@ func (w *WSClient) buildStreamURL() string {
 		wsURL = "wss://fstream.binance.com"
 	}
 
-	symbolLower := strings.ToLower(w.config.Symbol)
-	markPriceStream := fmt.Sprintf("%s@markPrice@1s", symbolLower)
-	forceOrderStream := fmt.Sprintf("%s@forceOrder", symbolLower)
+	var streams []string
+	for _, sym := range w.config.Symbols {
+		symbolLower := strings.ToLower(sym)
+		streams = append(streams, fmt.Sprintf("%s@markPrice@1s", symbolLower))
+		streams = append(streams, fmt.Sprintf("%s@forceOrder", symbolLower))
+	}
 
-	return fmt.Sprintf("%s/stream?streams=%s/%s", wsURL, markPriceStream, forceOrderStream)
+	return fmt.Sprintf("%s/stream?streams=%s", wsURL, strings.Join(streams, "/"))
+}
+
+func (w *WSClient) resolveSymbol(streamName string) string {
+	// Extract binance symbol from stream name, e.g. "btcusdt@markPrice@1s" -> "BTCUSDT"
+	parts := strings.SplitN(streamName, "@", 2)
+	if len(parts) == 0 {
+		return ""
+	}
+	binanceSymbol := strings.ToUpper(parts[0])
+	if key, ok := w.config.SymbolToKey[binanceSymbol]; ok {
+		return key
+	}
+	return ""
 }
 
 func (w *WSClient) Connect(ctx context.Context) error {
@@ -89,7 +105,7 @@ func (w *WSClient) Connect(ctx context.Context) error {
 
 	w.logger.Debug().
 		Str("url", streamURL).
-		Str("symbol", w.config.Symbol).
+		Int("symbols", len(w.config.Symbols)).
 		Msg("binance perps: connecting to websocket")
 
 	headers := http.Header{}
@@ -108,7 +124,7 @@ func (w *WSClient) Connect(ctx context.Context) error {
 	w.connected.Store(true)
 
 	w.logger.Info().
-		Str("symbol", w.config.Symbol).
+		Int("symbols", len(w.config.Symbols)).
 		Msg("binance perps: connected to futures stream")
 
 	if w.onConnect != nil {
@@ -192,6 +208,12 @@ func (w *WSClient) readLoop(ctx context.Context) error {
 }
 
 func (w *WSClient) handleStreamMessage(stream string, data json.RawMessage) {
+	symbol := w.resolveSymbol(stream)
+	if symbol == "" {
+		w.logger.Warn().Str("stream", stream).Msg("binance perps: unknown symbol in stream")
+		return
+	}
+
 	if IsMarkPriceStream(stream) {
 		markPrice, err := ParseMarkPrice(data)
 		if err != nil {
@@ -200,7 +222,7 @@ func (w *WSClient) handleStreamMessage(stream string, data json.RawMessage) {
 		}
 
 		if w.onMarkPrice != nil {
-			w.onMarkPrice(markPrice)
+			w.onMarkPrice(symbol, markPrice)
 		}
 
 	} else if IsForceOrderStream(stream) {
@@ -211,7 +233,7 @@ func (w *WSClient) handleStreamMessage(stream string, data json.RawMessage) {
 		}
 
 		if w.onLiquidation != nil {
-			w.onLiquidation(liquidation)
+			w.onLiquidation(symbol, liquidation)
 		}
 	}
 }

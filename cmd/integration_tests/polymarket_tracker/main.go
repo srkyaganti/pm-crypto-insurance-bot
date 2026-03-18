@@ -27,11 +27,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	var prefixes []string
+	for _, mf := range cfg.MarketFeeds {
+		prefixes = append(prefixes, mf.Prefix)
+	}
+
 	logger.Info().
 		Str("gamma_url", cfg.GammaURL).
 		Str("market_ws_url", cfg.MarketWsURL).
-		Strs("prefixes", cfg.MarketPrefixes).
-		Ints("windows", cfg.Windows).
+		Strs("prefixes", prefixes).
+		Int("market_feeds", len(cfg.MarketFeeds)).
 		Int("pre_schedule_windows", cfg.PreScheduleWindows).
 		Str("data_dir", cfg.DataDir).
 		Dur("log_interval", cfg.LogInterval).

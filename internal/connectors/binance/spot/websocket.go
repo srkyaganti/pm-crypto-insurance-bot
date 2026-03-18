@@ -31,8 +31,8 @@ type WSClient struct {
 	stopCh    chan struct{}
 	stopOnce  sync.Once
 
-	onDepthUpdate func(data *DepthData)
-	onAggTrade    func(data *AggTradeData)
+	onDepthUpdate func(symbol string, data *DepthData)
+	onAggTrade    func(symbol string, data *AggTradeData)
 	onConnect     func()
 	onDisconnect  func(err error)
 
@@ -50,11 +50,11 @@ func NewWSClient(cfg *Config, logger *zerolog.Logger) *WSClient {
 	}
 }
 
-func (w *WSClient) OnDepthUpdate(fn func(data *DepthData)) {
+func (w *WSClient) OnDepthUpdate(fn func(symbol string, data *DepthData)) {
 	w.onDepthUpdate = fn
 }
 
-func (w *WSClient) OnAggTrade(fn func(data *AggTradeData)) {
+func (w *WSClient) OnAggTrade(fn func(symbol string, data *AggTradeData)) {
 	w.onAggTrade = fn
 }
 
@@ -72,11 +72,27 @@ func (w *WSClient) buildStreamURL() string {
 		wsURL = "wss://stream.binance.com:9443"
 	}
 
-	symbolLower := strings.ToLower(w.config.Symbol)
-	depthStream := fmt.Sprintf("%s@depth20@100ms", symbolLower)
-	aggTradeStream := fmt.Sprintf("%s@aggTrade", symbolLower)
+	var streams []string
+	for _, sym := range w.config.Symbols {
+		symbolLower := strings.ToLower(sym)
+		streams = append(streams, fmt.Sprintf("%s@depth20@100ms", symbolLower))
+		streams = append(streams, fmt.Sprintf("%s@aggTrade", symbolLower))
+	}
 
-	return fmt.Sprintf("%s/stream?streams=%s/%s", wsURL, depthStream, aggTradeStream)
+	return fmt.Sprintf("%s/stream?streams=%s", wsURL, strings.Join(streams, "/"))
+}
+
+func (w *WSClient) resolveSymbol(streamName string) string {
+	// Extract binance symbol from stream name, e.g. "btcusdt@depth20@100ms" -> "btcusdt"
+	parts := strings.SplitN(streamName, "@", 2)
+	if len(parts) == 0 {
+		return ""
+	}
+	binanceSymbol := strings.ToUpper(parts[0])
+	if key, ok := w.config.SymbolToKey[binanceSymbol]; ok {
+		return key
+	}
+	return ""
 }
 
 func (w *WSClient) Connect(ctx context.Context) error {
@@ -91,7 +107,7 @@ func (w *WSClient) Connect(ctx context.Context) error {
 
 	w.logger.Debug().
 		Str("url", streamURL).
-		Str("symbol", w.config.Symbol).
+		Int("symbols", len(w.config.Symbols)).
 		Msg("binance spot: connecting to websocket")
 
 	headers := http.Header{}
@@ -110,7 +126,7 @@ func (w *WSClient) Connect(ctx context.Context) error {
 	w.connected.Store(true)
 
 	w.logger.Info().
-		Str("symbol", w.config.Symbol).
+		Int("symbols", len(w.config.Symbols)).
 		Msg("binance spot: connected to data stream")
 
 	if w.onConnect != nil {
@@ -194,7 +210,13 @@ func (w *WSClient) readLoop(ctx context.Context) error {
 }
 
 func (w *WSClient) handleStreamMessage(stream string, data json.RawMessage) {
-	if strings.HasSuffix(stream, "@depth20@100ms") {
+	symbol := w.resolveSymbol(stream)
+	if symbol == "" {
+		w.logger.Warn().Str("stream", stream).Msg("binance spot: unknown symbol in stream")
+		return
+	}
+
+	if strings.Contains(stream, "@depth20@100ms") {
 		depthData, err := ParsePartialDepth(data)
 		if err != nil {
 			w.logger.Error().Err(err).Msg("binance spot: parse partial depth")
@@ -202,10 +224,10 @@ func (w *WSClient) handleStreamMessage(stream string, data json.RawMessage) {
 		}
 
 		if w.onDepthUpdate != nil {
-			w.onDepthUpdate(depthData)
+			w.onDepthUpdate(symbol, depthData)
 		}
 
-	} else if strings.HasSuffix(stream, "@aggTrade") {
+	} else if strings.Contains(stream, "@aggTrade") {
 		tradeData, err := ParseAggTrade(data)
 		if err != nil {
 			w.logger.Error().Err(err).Msg("binance spot: parse aggTrade")
@@ -213,7 +235,7 @@ func (w *WSClient) handleStreamMessage(stream string, data json.RawMessage) {
 		}
 
 		if w.onAggTrade != nil {
-			w.onAggTrade(tradeData)
+			w.onAggTrade(symbol, tradeData)
 		}
 	}
 }

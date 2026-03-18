@@ -24,8 +24,9 @@ type MarketTracker struct {
 	scheduledTimers map[string]*time.Timer
 	marketHistory   *MarketHistory
 
-	config    *Config
-	btcFeedID string
+	config          *Config
+	prefixToFeedID  map[string]string
+	prefixToWindows map[string][]int
 
 	mu     sync.RWMutex
 	ctx    context.Context
@@ -33,18 +34,32 @@ type MarketTracker struct {
 }
 
 func NewMarketTracker(cfg *Config, logger *zerolog.Logger) (*MarketTracker, error) {
-	stateStore := state.NewStateStore()
+	stateStore := state.NewStateStore([]string{})
 
 	gammaClient := gamma.NewClient(gamma.ClientConfig{
 		BaseURL: cfg.GammaURL,
 	})
 
+	// Build feedIDs map for chainlink client
+	feedIDs := make(map[string]string)
+	feedIDToSymbol := make(map[string]string)
+	prefixToFeedID := make(map[string]string)
+	prefixToWindows := make(map[string][]int)
+
+	for _, mf := range cfg.MarketFeeds {
+		feedIDs[mf.Prefix] = mf.FeedID
+		feedIDToSymbol[mf.FeedID] = mf.Prefix
+		prefixToFeedID[mf.Prefix] = mf.FeedID
+		prefixToWindows[mf.Prefix] = mf.Windows
+	}
+
 	chainlinkCfg := &chainlink.Config{
-		RestURL:   cfg.ChainlinkRestURL,
-		WsURL:     cfg.ChainlinkWsURL,
-		ApiKey:    cfg.ChainlinkApiKey,
-		ApiSecret: cfg.ChainlinkApiSecret,
-		FeedID:    cfg.BTCFeedID,
+		RestURL:        cfg.ChainlinkRestURL,
+		WsURL:          cfg.ChainlinkWsURL,
+		ApiKey:         cfg.ChainlinkApiKey,
+		ApiSecret:      cfg.ChainlinkApiSecret,
+		FeedIDs:        feedIDs,
+		FeedIDToSymbol: feedIDToSymbol,
 	}
 
 	chainlinkLogger := logger.With().Str("component", "chainlink").Logger()
@@ -78,7 +93,8 @@ func NewMarketTracker(cfg *Config, logger *zerolog.Logger) (*MarketTracker, erro
 		scheduledTimers: make(map[string]*time.Timer),
 		marketHistory:   marketHistory,
 		config:          cfg,
-		btcFeedID:       cfg.BTCFeedID,
+		prefixToFeedID:  prefixToFeedID,
+		prefixToWindows: prefixToWindows,
 	}, nil
 }
 
@@ -104,8 +120,8 @@ func (mt *MarketTracker) Start(ctx context.Context) error {
 
 	mt.logger.Info().Msg("Market connector is healthy")
 
-	for _, prefix := range mt.config.MarketPrefixes {
-		for _, window := range mt.config.Windows {
+	for prefix, windows := range mt.prefixToWindows {
+		for _, window := range windows {
 			currentSlug := gamma.GetCurrentSlug(prefix, window)
 
 			mt.logger.Info().
@@ -172,8 +188,8 @@ func (mt *MarketTracker) Stop() error {
 	return nil
 }
 
-func (mt *MarketTracker) getChainlinkPriceAtTimestamp(ctx context.Context, timestamp uint64) (float64, error) {
-	report, err := mt.chainlinkClient.GetReportAtTimestampForFeed(ctx, mt.btcFeedID, timestamp)
+func (mt *MarketTracker) getChainlinkPriceAtTimestamp(ctx context.Context, feedID string, timestamp uint64) (float64, error) {
+	report, err := mt.chainlinkClient.GetReportAtTimestampForFeed(ctx, feedID, timestamp)
 	if err != nil {
 		return 0, fmt.Errorf("get chainlink report: %w", err)
 	}
@@ -187,7 +203,7 @@ func (mt *MarketTracker) getChainlinkPriceAtTimestamp(ctx context.Context, times
 	mt.logger.Debug().
 		Uint64("timestamp", timestamp).
 		Float64("price", price).
-		Str("feed_id", mt.btcFeedID).
+		Str("feed_id", feedID).
 		Msg("Fetched Chainlink price")
 
 	return price, nil

@@ -9,6 +9,9 @@ func Validate(cfg *Config) error {
 	if err := validateApp(cfg); err != nil {
 		return err
 	}
+	if err := validateMarkets(cfg); err != nil {
+		return err
+	}
 	if err := validateLogging(cfg); err != nil {
 		return err
 	}
@@ -30,12 +33,67 @@ func validateApp(cfg *Config) error {
 		return fmt.Errorf("invalid app.mode: %s (must be 'paper' or 'live')", cfg.App.Mode)
 	}
 
-	if cfg.App.Symbol == "" {
-		return fmt.Errorf("app.symbol is required")
-	}
-
 	if cfg.App.TickIntervalMs <= 0 {
 		cfg.App.TickIntervalMs = 100
+	}
+
+	return nil
+}
+
+func validateMarkets(cfg *Config) error {
+	if len(cfg.Markets) == 0 {
+		return fmt.Errorf("at least one market must be defined in markets[]")
+	}
+
+	seenSymbols := make(map[string]bool)
+	seenFeedIDs := make(map[string]bool)
+	seenBinance := make(map[string]bool)
+	seenPrefixes := make(map[string]bool)
+
+	for i, m := range cfg.Markets {
+		if m.Symbol == "" {
+			return fmt.Errorf("markets[%d].symbol is required", i)
+		}
+		if seenSymbols[m.Symbol] {
+			return fmt.Errorf("duplicate symbol in markets: %s", m.Symbol)
+		}
+		seenSymbols[m.Symbol] = true
+
+		if m.ChainlinkFeedID == "" {
+			return fmt.Errorf("markets[%d].chainlink_feed_id is required (symbol: %s)", i, m.Symbol)
+		}
+		if !strings.HasPrefix(m.ChainlinkFeedID, "0x") {
+			return fmt.Errorf("markets[%d].chainlink_feed_id must start with 0x (symbol: %s)", i, m.Symbol)
+		}
+		if seenFeedIDs[m.ChainlinkFeedID] {
+			return fmt.Errorf("duplicate chainlink_feed_id in markets: %s", m.ChainlinkFeedID)
+		}
+		seenFeedIDs[m.ChainlinkFeedID] = true
+
+		if m.BinanceSymbol == "" {
+			return fmt.Errorf("markets[%d].binance_symbol is required (symbol: %s)", i, m.Symbol)
+		}
+		if seenBinance[m.BinanceSymbol] {
+			return fmt.Errorf("duplicate binance_symbol in markets: %s", m.BinanceSymbol)
+		}
+		seenBinance[m.BinanceSymbol] = true
+
+		if m.Polymarket.Prefix == "" {
+			return fmt.Errorf("markets[%d].polymarket.prefix is required (symbol: %s)", i, m.Symbol)
+		}
+		if seenPrefixes[m.Polymarket.Prefix] {
+			return fmt.Errorf("duplicate polymarket prefix in markets: %s", m.Polymarket.Prefix)
+		}
+		seenPrefixes[m.Polymarket.Prefix] = true
+
+		if len(m.Polymarket.Windows) == 0 {
+			return fmt.Errorf("markets[%d].polymarket.windows must have at least one entry (symbol: %s)", i, m.Symbol)
+		}
+		for j, w := range m.Polymarket.Windows {
+			if w <= 0 {
+				return fmt.Errorf("markets[%d].polymarket.windows[%d] must be positive (symbol: %s)", i, j, m.Symbol)
+			}
+		}
 	}
 
 	return nil
@@ -95,9 +153,6 @@ func ValidateConnectorCredentials(cfg *Config) error {
 	}
 	if cfg.Chainlink.ApiSecret == "" {
 		return fmt.Errorf("chainlink.api_secret is required")
-	}
-	if cfg.Chainlink.FeedID == "" {
-		return fmt.Errorf("chainlink.feed_id is required")
 	}
 
 	if cfg.Polymarket.ApiKey == "" {

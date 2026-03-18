@@ -32,9 +32,6 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("APP_MODE"); v != "" {
 		cfg.App.Mode = v
 	}
-	if v := os.Getenv("APP_SYMBOL"); v != "" {
-		cfg.App.Symbol = v
-	}
 	if v := os.Getenv("CHAINLINK_API_KEY"); v != "" {
 		cfg.Chainlink.ApiKey = v
 	}
@@ -110,4 +107,13 @@ func DefaultConfig() *Config {
 			FlushIntervalMs:  1000,
 		},
 	}
+}
+
+func (c *Config) SymbolForFeedID(feedID string) string {
+	for _, m := range c.Markets {
+		if m.ChainlinkFeedID == feedID {
+			return m.Symbol
+		}
+	}
+	return ""
 }

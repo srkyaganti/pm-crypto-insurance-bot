@@ -41,6 +41,11 @@ func NewConnector(
 ) *Connector {
 	logger := logging.Component(baseLogger, "chainlink")
 
+	perSymbol := make(map[string]*SymbolHealth, len(cfg.FeedIDs))
+	for symbol := range cfg.FeedIDs {
+		perSymbol[symbol] = &SymbolHealth{}
+	}
+
 	return &Connector{
 		name:        "chainlink",
 		config:      cfg,
@@ -50,6 +55,7 @@ func NewConnector(
 		health: HealthStatus{
 			IsConnected: false,
 			IsStale:     true,
+			PerSymbol:   perSymbol,
 		},
 	}
 }
@@ -79,12 +85,14 @@ func (c *Connector) Start(ctx context.Context) error {
 		return fmt.Errorf("initialize client: %w", err)
 	}
 
-	c.state.UpdateChainlink(func(s *state.ChainlinkState) {
-		s.IsStale = true
-	})
+	for symbol := range c.config.FeedIDs {
+		c.state.UpdateChainlink(symbol, func(s *state.ChainlinkState) {
+			s.IsStale = true
+		})
+	}
 
 	c.logEvent(persistence.EventSystem, "connector_starting", map[string]interface{}{
-		"feed_id":         c.config.FeedID,
+		"feed_count":      len(c.config.FeedIDs),
 		"stale_threshold": c.config.StaleThreshold.String(),
 		"ha_mode":         c.config.WsHA,
 	})
@@ -112,7 +120,7 @@ func (c *Connector) runStreamLoop(ctx context.Context) error {
 
 		if isConnected {
 			c.logEvent(persistence.EventConnector, "connected", map[string]interface{}{
-				"feed_id": c.config.FeedID,
+				"feed_count": len(c.config.FeedIDs),
 			})
 		} else {
 			c.logEvent(persistence.EventConnector, "disconnected", nil)
@@ -157,10 +165,16 @@ func (c *Connector) handleReport(reportResp *streams.ReportResponse) error {
 		return fmt.Errorf("decode report: %w", err)
 	}
 
+	feedIDStr := decoded.Data.FeedID.String()
+	symbol := c.config.FeedIDToSymbol[feedIDStr]
+	if symbol == "" {
+		return fmt.Errorf("unknown feed ID: %s", feedIDStr)
+	}
+
 	price := bigIntToFloat(decoded.Data.BenchmarkPrice)
 	now := time.Now()
 
-	c.state.UpdateChainlink(func(s *state.ChainlinkState) {
+	c.state.UpdateChainlink(symbol, func(s *state.ChainlinkState) {
 		s.LatestPrice = price
 		s.LastUpdate = now
 		s.IsStale = false
@@ -172,14 +186,23 @@ func (c *Connector) handleReport(reportResp *streams.ReportResponse) error {
 		s.Ticks.Add(tick)
 	})
 
-	c.state.UpdateRisk(func(s *state.RiskState) {
-		s.ChainlinkFresh = true
-		s.LastRiskUpdate = now
+	c.state.UpdateSymbolFreshness(symbol, func(sf *state.SymbolFreshness) {
+		sf.ChainlinkFresh = true
+		sf.LastUpdate = now
 	})
+
+	c.mu.Lock()
+	if sh := c.health.PerSymbol[symbol]; sh != nil {
+		sh.LastUpdate = now
+		sh.ReportsCount++
+		sh.IsStale = false
+	}
+	c.mu.Unlock()
 
 	c.lastUpdate = now
 
 	c.logger.Info().
+		Str("symbol", symbol).
 		Float64("price", price).
 		Uint32("obs_ts", decoded.Data.ObservationsTimestamp).
 		Int64("now_ts", now.Unix()).
@@ -216,13 +239,14 @@ func (c *Connector) Stop() error {
 
 	c.wg.Wait()
 
-	c.state.UpdateChainlink(func(s *state.ChainlinkState) {
-		s.IsStale = true
-	})
-
-	c.state.UpdateRisk(func(s *state.RiskState) {
-		s.ChainlinkFresh = false
-	})
+	for symbol := range c.config.FeedIDs {
+		c.state.UpdateChainlink(symbol, func(s *state.ChainlinkState) {
+			s.IsStale = true
+		})
+		c.state.UpdateSymbolFreshness(symbol, func(sf *state.SymbolFreshness) {
+			sf.ChainlinkFresh = false
+		})
+	}
 
 	c.logEvent(persistence.EventSystem, "connector_stopped", nil)
 
@@ -275,12 +299,16 @@ func (c *Connector) checkStaleness() {
 	c.health.IsStale = c.isStale()
 
 	if c.health.IsStale {
-		c.state.UpdateChainlink(func(s *state.ChainlinkState) {
-			s.IsStale = true
-		})
+		for symbol := range c.config.FeedIDs {
+			c.state.UpdateChainlink(symbol, func(s *state.ChainlinkState) {
+				s.IsStale = true
+			})
+			c.state.UpdateSymbolFreshness(symbol, func(sf *state.SymbolFreshness) {
+				sf.ChainlinkFresh = false
+			})
+		}
 
 		c.state.UpdateRisk(func(s *state.RiskState) {
-			s.ChainlinkFresh = false
 			s.FeedsHealthy = false
 		})
 
@@ -329,24 +357,24 @@ func (c *Connector) decodeReport(reportResp *streams.ReportResponse) (*DecodedRe
 	}, nil
 }
 
-func (c *Connector) GetReportAtTimestamp(ctx context.Context, timestamp uint64) (*DecodedReport, error) {
-	reportResp, err := c.client.GetReportAtTimestamp(ctx, timestamp)
+func (c *Connector) GetReportAtTimestamp(ctx context.Context, feedIDHex string, timestamp uint64) (*DecodedReport, error) {
+	reportResp, err := c.client.GetReportAtTimestampForFeed(ctx, feedIDHex, timestamp)
 	if err != nil {
 		return nil, err
 	}
 
-	report, err := c.decodeReport(reportResp)
+	decoded, err := c.decodeReport(reportResp)
 	if err != nil {
 		return nil, err
 	}
 
 	c.logger.Debug().
-		Str("feed_id", report.FeedID).
+		Str("feed_id", decoded.FeedID).
 		Uint64("timestamp", timestamp).
-		Float64("benchmark_price", report.BenchmarkPrice).
+		Float64("benchmark_price", decoded.BenchmarkPrice).
 		Msg("chainlink: fetched historical report")
 
-	return report, nil
+	return decoded, nil
 }
 
 func (c *Connector) GetReportAtTimestampForFeed(ctx context.Context, feedID string, timestamp uint64) (*DecodedReport, error) {
@@ -355,16 +383,16 @@ func (c *Connector) GetReportAtTimestampForFeed(ctx context.Context, feedID stri
 		return nil, err
 	}
 
-	report, err := c.decodeReport(reportResp)
+	decoded, err := c.decodeReport(reportResp)
 	if err != nil {
 		return nil, err
 	}
 
 	c.logger.Debug().
-		Str("feed_id", report.FeedID).
+		Str("feed_id", decoded.FeedID).
 		Uint64("timestamp", timestamp).
-		Float64("benchmark_price", report.BenchmarkPrice).
+		Float64("benchmark_price", decoded.BenchmarkPrice).
 		Msg("chainlink: fetched historical report")
 
-	return report, nil
+	return decoded, nil
 }

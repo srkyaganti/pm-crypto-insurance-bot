@@ -3,7 +3,6 @@ package perps
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -29,9 +28,9 @@ type Connector struct {
 
 	health HealthStatus
 
-	liquidations     []state.LiquidationEvent
+	// per-symbol liquidation tracking
+	liquidations     map[string][]state.LiquidationEvent
 	liquidationsMu   sync.Mutex
-	liquidationCount int
 }
 
 func NewConnector(
@@ -49,13 +48,18 @@ func NewConnector(
 		cfg.StaleThreshold = 2 * time.Second
 	}
 
+	liquidations := make(map[string][]state.LiquidationEvent, len(cfg.SymbolToKey))
+	for _, canonical := range cfg.SymbolToKey {
+		liquidations[canonical] = make([]state.LiquidationEvent, 0, cfg.MaxLiquidations)
+	}
+
 	return &Connector{
 		name:         "binance_perps",
 		config:       cfg,
 		state:        stateStore,
 		persistence:  persistWriter,
 		logger:       logger,
-		liquidations: make([]state.LiquidationEvent, 0, cfg.MaxLiquidations),
+		liquidations: liquidations,
 		health: HealthStatus{
 			IsConnected: false,
 			IsStale:     true,
@@ -77,7 +81,8 @@ func (c *Connector) Start(ctx context.Context) error {
 	c.mu.Unlock()
 
 	wsConfig := &Config{
-		Symbol:          strings.ToLower(c.config.Symbol),
+		Symbols:         c.config.Symbols,
+		SymbolToKey:     c.config.SymbolToKey,
 		WsURL:           c.config.WsURL,
 		StaleThreshold:  c.config.StaleThreshold,
 		MaxLiquidations: c.config.MaxLiquidations,
@@ -94,7 +99,7 @@ func (c *Connector) Start(ctx context.Context) error {
 		c.mu.Unlock()
 
 		c.logEvent(persistence.EventConnector, "connected", map[string]interface{}{
-			"symbol": c.config.Symbol,
+			"symbols": c.config.Symbols,
 		})
 	})
 	c.wsClient.OnDisconnect(func(err error) {
@@ -107,13 +112,14 @@ func (c *Connector) Start(ctx context.Context) error {
 		})
 	})
 
-	c.state.UpdateBinancePerps(func(s *state.BinancePerpsState) {
-		s.Symbol = strings.ToUpper(c.config.Symbol)
-		s.IsStale = true
-	})
+	for _, canonical := range c.config.SymbolToKey {
+		c.state.UpdateBinancePerps(canonical, func(s *state.BinancePerpsState) {
+			s.IsStale = true
+		})
+	}
 
 	c.logEvent(persistence.EventSystem, "connector_starting", map[string]interface{}{
-		"symbol":           c.config.Symbol,
+		"symbols":          c.config.Symbols,
 		"stale_threshold":  c.config.StaleThreshold.String(),
 		"max_liquidations": c.config.MaxLiquidations,
 	})
@@ -149,7 +155,7 @@ func (c *Connector) Start(ctx context.Context) error {
 	return nil
 }
 
-func (c *Connector) handleMarkPrice(data *MarkPriceData) {
+func (c *Connector) handleMarkPrice(symbol string, data *MarkPriceData) {
 	now := time.Now()
 
 	c.mu.Lock()
@@ -158,24 +164,25 @@ func (c *Connector) handleMarkPrice(data *MarkPriceData) {
 	c.health.IsStale = false
 	c.mu.Unlock()
 
-	c.state.UpdateBinancePerps(func(s *state.BinancePerpsState) {
+	c.state.UpdateBinancePerps(symbol, func(s *state.BinancePerpsState) {
 		s.LastMarkPrice = data.MarkPrice
 		s.LastMarkUpdate = now
 		s.IsStale = false
 	})
 
-	c.state.UpdateRisk(func(s *state.RiskState) {
-		s.BinanceFresh = true
-		s.LastRiskUpdate = now
+	c.state.UpdateSymbolFreshness(symbol, func(sf *state.SymbolFreshness) {
+		sf.BinanceFresh = true
+		sf.LastUpdate = now
 	})
 
 	c.logger.Debug().
+		Str("symbol", symbol).
 		Float64("mark_price", data.MarkPrice).
 		Float64("index_price", data.IndexPrice).
 		Msg("binance perps: mark price update")
 }
 
-func (c *Connector) handleLiquidation(data *LiquidationData) {
+func (c *Connector) handleLiquidation(symbol string, data *LiquidationData) {
 	now := time.Now()
 
 	c.mu.Lock()
@@ -191,23 +198,24 @@ func (c *Connector) handleLiquidation(data *LiquidationData) {
 	}
 
 	c.liquidationsMu.Lock()
-	c.liquidations = append(c.liquidations, event)
-	if len(c.liquidations) > c.config.MaxLiquidations {
-		c.liquidations = c.liquidations[1:]
+	liqList := c.liquidations[symbol]
+	liqList = append(liqList, event)
+	if len(liqList) > c.config.MaxLiquidations {
+		liqList = liqList[1:]
 	}
-	c.liquidationCount = len(c.liquidations)
-	liquidationCount := c.liquidationCount
+	c.liquidations[symbol] = liqList
+	liquidationCount := len(liqList)
 	c.liquidationsMu.Unlock()
 
-	liquidationFlag := c.detectLiquidationCluster(liquidationCount)
+	liquidationFlag := liquidationCount >= 3
 
-	c.state.UpdateBinancePerps(func(s *state.BinancePerpsState) {
-		s.RecentLiquidations = c.getLiquidationsCopy()
+	c.state.UpdateBinancePerps(symbol, func(s *state.BinancePerpsState) {
+		s.RecentLiquidations = c.getLiquidationsCopy(symbol)
 		s.LiquidationFlag = liquidationFlag
 	})
 
 	c.logEvent(persistence.EventConnector, "liquidation_event", map[string]interface{}{
-		"symbol":       data.Symbol,
+		"symbol":       symbol,
 		"side":         data.Side,
 		"price":        data.Price,
 		"quantity":     data.Quantity,
@@ -216,6 +224,7 @@ func (c *Connector) handleLiquidation(data *LiquidationData) {
 	})
 
 	c.logger.Warn().
+		Str("symbol", symbol).
 		Str("side", data.Side).
 		Float64("price", data.Price).
 		Float64("quantity", data.Quantity).
@@ -224,19 +233,14 @@ func (c *Connector) handleLiquidation(data *LiquidationData) {
 		Msg("binance perps: liquidation event")
 }
 
-func (c *Connector) detectLiquidationCluster(count int) bool {
-	return count >= 3
-}
-
-func (c *Connector) getLiquidationsCopy() []state.LiquidationEvent {
+func (c *Connector) getLiquidationsCopy(symbol string) []state.LiquidationEvent {
 	c.liquidationsMu.Lock()
 	defer c.liquidationsMu.Unlock()
 
-	copy := make([]state.LiquidationEvent, len(c.liquidations))
-	for i, e := range c.liquidations {
-		copy[i] = e
-	}
-	return copy
+	src := c.liquidations[symbol]
+	cp := make([]state.LiquidationEvent, len(src))
+	copy(cp, src)
+	return cp
 }
 
 func (c *Connector) checkStaleness() {
@@ -245,7 +249,7 @@ func (c *Connector) checkStaleness() {
 
 	if !c.health.IsConnected {
 		c.health.IsStale = true
-		c.markStale()
+		c.markAllStale()
 		return
 	}
 
@@ -254,7 +258,7 @@ func (c *Connector) checkStaleness() {
 
 		if timeSinceMark > c.config.StaleThreshold {
 			c.health.IsStale = true
-			c.markStale()
+			c.markAllStale()
 
 			c.logger.Warn().
 				Dur("mark_age", timeSinceMark).
@@ -263,13 +267,17 @@ func (c *Connector) checkStaleness() {
 	}
 }
 
-func (c *Connector) markStale() {
-	c.state.UpdateBinancePerps(func(s *state.BinancePerpsState) {
-		s.IsStale = true
-	})
+func (c *Connector) markAllStale() {
+	for _, canonical := range c.config.SymbolToKey {
+		c.state.UpdateBinancePerps(canonical, func(s *state.BinancePerpsState) {
+			s.IsStale = true
+		})
+		c.state.UpdateSymbolFreshness(canonical, func(sf *state.SymbolFreshness) {
+			sf.BinanceFresh = false
+		})
+	}
 
 	c.state.UpdateRisk(func(s *state.RiskState) {
-		s.BinanceFresh = false
 		s.FeedsHealthy = false
 	})
 }
@@ -294,13 +302,14 @@ func (c *Connector) Stop() error {
 
 	c.wg.Wait()
 
-	c.state.UpdateBinancePerps(func(s *state.BinancePerpsState) {
-		s.IsStale = true
-	})
-
-	c.state.UpdateRisk(func(s *state.RiskState) {
-		s.BinanceFresh = false
-	})
+	for _, canonical := range c.config.SymbolToKey {
+		c.state.UpdateBinancePerps(canonical, func(s *state.BinancePerpsState) {
+			s.IsStale = true
+		})
+		c.state.UpdateSymbolFreshness(canonical, func(sf *state.SymbolFreshness) {
+			sf.BinanceFresh = false
+		})
+	}
 
 	c.logEvent(persistence.EventSystem, "connector_stopped", nil)
 
@@ -357,5 +366,11 @@ func (c *Connector) IsRunning() bool {
 func (c *Connector) GetStats() (int64, int64, int, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.health.MarkUpdates, c.health.LiquidationEvents, c.liquidationCount, c.health.IsStale
+	totalLiquidations := 0
+	c.liquidationsMu.Lock()
+	for _, liq := range c.liquidations {
+		totalLiquidations += len(liq)
+	}
+	c.liquidationsMu.Unlock()
+	return c.health.MarkUpdates, c.health.LiquidationEvents, totalLiquidations, c.health.IsStale
 }

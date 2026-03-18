@@ -14,9 +14,13 @@ func TestConfigValidation(t *testing.T) {
 		ChainlinkRestURL:   "https://test.com",
 		ChainlinkApiKey:    "test-key",
 		ChainlinkApiSecret: "test-secret",
-		BTCFeedID:          "test-feed-id",
-		MarketPrefixes:     []string{"btc-updown-"},
-		Windows:            []int{5, 15},
+		MarketFeeds: []MarketFeedConfig{
+			{
+				Prefix:  "btc-updown-",
+				FeedID:  "0xtest-feed-id",
+				Windows: []int{5, 15},
+			},
+		},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -109,7 +113,6 @@ func TestMarketHistoryStats(t *testing.T) {
 }
 
 func TestPaperTrade(t *testing.T) {
-	// This is a unit test for the data structures
 	trade := PaperTrade{
 		Timestamp: time.Now(),
 		AssetID:   "test-asset",
@@ -141,14 +144,12 @@ func TestPosition(t *testing.T) {
 		t.Errorf("Expected side 'yes', got '%s'", position.Side)
 	}
 
-	// Calculate PnL for winning position
 	winPnL := position.Size * (1.0 - position.EntryPrice)
-	expectedPnL := 10.0 * 0.48 // 4.8
+	expectedPnL := 10.0 * 0.48
 	if winPnL != expectedPnL {
 		t.Errorf("Expected win PnL %f, got %f", expectedPnL, winPnL)
 	}
 
-	// Calculate PnL for losing position
 	lossPnL := -position.Size * position.EntryPrice
 	expectedLossPnL := -5.2
 	if lossPnL != expectedLossPnL {

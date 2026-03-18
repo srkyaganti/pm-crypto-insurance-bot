@@ -14,19 +14,28 @@ type Client struct {
 	logger    *zerolog.Logger
 	sdkClient streams.Client
 	stream    streams.Stream
-	feedID    feed.ID
+	feedIDs   []feed.ID
+	feedIDMap map[string]string // feedID string -> symbol
 }
 
 func NewClient(cfg *Config, logger *zerolog.Logger) (*Client, error) {
-	var feedID feed.ID
-	if err := feedID.FromString(cfg.FeedID); err != nil {
-		return nil, fmt.Errorf("invalid feed ID: %w", err)
+	feedIDs := make([]feed.ID, 0, len(cfg.FeedIDs))
+	feedIDMap := make(map[string]string, len(cfg.FeedIDs))
+
+	for symbol, hexID := range cfg.FeedIDs {
+		var fid feed.ID
+		if err := fid.FromString(hexID); err != nil {
+			return nil, fmt.Errorf("invalid feed ID for %s: %w", symbol, err)
+		}
+		feedIDs = append(feedIDs, fid)
+		feedIDMap[fid.String()] = symbol
 	}
 
 	return &Client{
-		config: cfg,
-		logger: logger,
-		feedID: feedID,
+		config:    cfg,
+		logger:    logger,
+		feedIDs:   feedIDs,
+		feedIDMap: feedIDMap,
 	}, nil
 }
 
@@ -51,6 +60,7 @@ func (c *Client) Initialize() error {
 		Str("rest_url", c.config.RestURL).
 		Str("ws_url", c.config.WsURL).
 		Bool("ha_mode", c.config.WsHA).
+		Int("feed_count", len(c.feedIDs)).
 		Msg("chainlink: SDK client initialized")
 
 	return nil
@@ -62,12 +72,12 @@ func (c *Client) logAdapter() func(format string, a ...any) {
 	}
 }
 
-func (c *Client) GetLatestReport(ctx context.Context) (*streams.ReportResponse, error) {
+func (c *Client) GetLatestReport(ctx context.Context, feedID feed.ID) (*streams.ReportResponse, error) {
 	if c.sdkClient == nil {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
-	report, err := c.sdkClient.GetLatestReport(ctx, c.feedID)
+	report, err := c.sdkClient.GetLatestReport(ctx, feedID)
 	if err != nil {
 		return nil, fmt.Errorf("get latest report: %w", err)
 	}
@@ -91,15 +101,22 @@ func (c *Client) Stream(ctx context.Context, statusCallback func(isConnected boo
 		}
 	}
 
-	stream, err := c.sdkClient.StreamWithStatusCallback(ctx, []feed.ID{c.feedID}, connStatusCallback)
+	stream, err := c.sdkClient.StreamWithStatusCallback(ctx, c.feedIDs, connStatusCallback)
 	if err != nil {
 		return fmt.Errorf("create stream: %w", err)
 	}
 
 	c.stream = stream
-	c.logger.Info().Str("feed_id", c.feedID.String()).Msg("chainlink: stream started")
+	c.logger.Info().
+		Int("feed_count", len(c.feedIDs)).
+		Msg("chainlink: stream started for all feeds")
 
 	return nil
+}
+
+// SymbolForFeedID looks up the canonical symbol for a decoded feed ID string.
+func (c *Client) SymbolForFeedID(feedIDStr string) string {
+	return c.feedIDMap[feedIDStr]
 }
 
 func (c *Client) Read(ctx context.Context) (*streams.ReportResponse, error) {
@@ -134,12 +151,12 @@ func (c *Client) Stats() streams.Stats {
 	return c.stream.Stats()
 }
 
-func (c *Client) GetReportAtTimestamp(ctx context.Context, timestamp uint64) (*streams.ReportResponse, error) {
+func (c *Client) GetReportAtTimestamp(ctx context.Context, feedID feed.ID, timestamp uint64) (*streams.ReportResponse, error) {
 	if c.sdkClient == nil {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
-	reports, err := c.sdkClient.GetReports(ctx, []feed.ID{c.feedID}, timestamp)
+	reports, err := c.sdkClient.GetReports(ctx, []feed.ID{feedID}, timestamp)
 	if err != nil {
 		return nil, fmt.Errorf("get report at timestamp %d: %w", timestamp, err)
 	}
@@ -151,13 +168,13 @@ func (c *Client) GetReportAtTimestamp(ctx context.Context, timestamp uint64) (*s
 	return reports[0], nil
 }
 
-func (c *Client) GetReportAtTimestampForFeed(ctx context.Context, feedID string, timestamp uint64) (*streams.ReportResponse, error) {
+func (c *Client) GetReportAtTimestampForFeed(ctx context.Context, feedIDHex string, timestamp uint64) (*streams.ReportResponse, error) {
 	if c.sdkClient == nil {
 		return nil, fmt.Errorf("client not initialized")
 	}
 
 	var fid feed.ID
-	if err := fid.FromString(feedID); err != nil {
+	if err := fid.FromString(feedIDHex); err != nil {
 		return nil, fmt.Errorf("invalid feed ID: %w", err)
 	}
 

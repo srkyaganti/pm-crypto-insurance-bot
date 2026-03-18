@@ -6,7 +6,8 @@ import (
 )
 
 type Config struct {
-	Symbol         string
+	Symbols        []string
+	SymbolToKey    map[string]string // lowercase binance symbol -> canonical (e.g. "btcusdt" -> "BTC")
 	WsURL          string
 	RestURL        string
 	DepthSpeed     string

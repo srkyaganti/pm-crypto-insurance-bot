@@ -10,6 +10,9 @@ type ActiveMarket struct {
 	NoAssetID   string
 	ConditionID string
 	WindowType  int
+	FeedID      string
+	Symbol      string
+	Prefix      string
 
 	StartTime    time.Time
 	EndTime      time.Time
@@ -46,6 +49,9 @@ type Position struct {
 type CompletedMarket struct {
 	Slug        string
 	WindowType  int
+	FeedID      string
+	Symbol      string
+	Prefix      string
 	StartTime   time.Time
 	EndTime     time.Time
 	YesAssetID  string
@@ -72,8 +78,6 @@ type CompletedMarket struct {
 }
 
 type TrackerConfig struct {
-	MarketPrefixes     []string
-	Windows            []int
 	PreScheduleWindows int
 	CustomFeatures     bool
 }

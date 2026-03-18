@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -44,7 +45,7 @@ func New(cfgPath string) (*App, error) {
 
 	supervisor := lifecycle.NewSupervisor(appLogger)
 
-	store := state.NewStateStore()
+	store := state.NewStateStore(cfg.Symbols())
 
 	app := &App{
 		config:     cfg,
@@ -76,12 +77,31 @@ func New(cfgPath string) (*App, error) {
 }
 
 func (a *App) initializeConnectors(logger *zerolog.Logger) error {
+	// Build lookup tables from markets config
+	feedIDs := make(map[string]string, len(a.config.Markets))         // symbol -> feedID
+	feedIDToSymbol := make(map[string]string, len(a.config.Markets))  // feedID -> symbol
+	binanceSymbols := make([]string, 0, len(a.config.Markets))
+	binanceToSymbol := make(map[string]string, len(a.config.Markets)) // "BTCUSDT" -> "BTC"
+	perpsSymbols := make([]string, 0, len(a.config.Markets))
+	perpsToSymbol := make(map[string]string, len(a.config.Markets))
+
+	for _, m := range a.config.Markets {
+		feedIDs[m.Symbol] = m.ChainlinkFeedID
+		feedIDToSymbol[m.ChainlinkFeedID] = m.Symbol
+		binanceSymbols = append(binanceSymbols, strings.ToLower(m.BinanceSymbol))
+		binanceToSymbol[m.BinanceSymbol] = m.Symbol
+		perpsSymbols = append(perpsSymbols, strings.ToLower(m.BinanceSymbol))
+		perpsToSymbol[m.BinanceSymbol] = m.Symbol
+	}
+
+	// Chainlink connector
 	chainlinkCfg := &chainlink.Config{
 		RestURL:        a.config.Chainlink.RestURL,
 		WsURL:          a.config.Chainlink.WsURL,
 		ApiKey:         a.config.Chainlink.ApiKey,
 		ApiSecret:      a.config.Chainlink.ApiSecret,
-		FeedID:         a.config.Chainlink.FeedID,
+		FeedIDs:        feedIDs,
+		FeedIDToSymbol: feedIDToSymbol,
 		WsHA:           a.config.Chainlink.WsHA,
 		WsMaxReconnect: a.config.Chainlink.WsMaxReconnect,
 		StaleThreshold: time.Duration(a.config.Risk.ChainlinkStaleMs) * time.Millisecond,
@@ -95,8 +115,10 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 	)
 	a.connectors = append(a.connectors, chainlinkConnector)
 
+	// Binance spot connector
 	binanceSpotCfg := &spot.Config{
-		Symbol:         a.config.BinanceSpot.Symbol,
+		Symbols:        binanceSymbols,
+		SymbolToKey:    binanceToSymbol,
 		WsURL:          a.config.BinanceSpot.WsURL,
 		RestURL:        a.config.BinanceSpot.RestURL,
 		DepthSpeed:     a.config.BinanceSpot.DepthSpeed,
@@ -112,8 +134,10 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 	)
 	a.connectors = append(a.connectors, binanceSpotConnector)
 
+	// Binance perps connector
 	binancePerpsCfg := &perps.Config{
-		Symbol:          a.config.BinancePerps.Symbol,
+		Symbols:         perpsSymbols,
+		SymbolToKey:     perpsToSymbol,
 		WsURL:           a.config.BinancePerps.WsURL,
 		StaleThreshold:  time.Duration(a.config.Risk.BinanceStaleMs) * time.Millisecond,
 		MaxLiquidations: 100,
@@ -127,6 +151,7 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 	)
 	a.connectors = append(a.connectors, binancePerpsConnector)
 
+	// Polymarket market connector
 	marketCfg := &market.Config{
 		WsURL:                a.config.Polymarket.WsURL,
 		CustomFeatureEnabled: a.config.Polymarket.Tracker.CustomFeatures,
@@ -140,16 +165,21 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 	marketConnector := market.NewConnector(marketCfg, a.state, logger)
 	a.connectors = append(a.connectors, marketConnector)
 
+	// Polymarket tracker connector
 	if a.config.Polymarket.Tracker.Enabled {
-		chainlinkClient, err := chainlink.NewClient(&chainlink.Config{
+		// Create a separate chainlink client for the tracker (REST-only for historical queries)
+		trackerChainlinkCfg := &chainlink.Config{
 			RestURL:        a.config.Chainlink.RestURL,
 			WsURL:          a.config.Chainlink.WsURL,
 			ApiKey:         a.config.Chainlink.ApiKey,
 			ApiSecret:      a.config.Chainlink.ApiSecret,
-			FeedID:         a.config.Chainlink.FeedID,
+			FeedIDs:        feedIDs,
+			FeedIDToSymbol: feedIDToSymbol,
 			WsHA:           a.config.Chainlink.WsHA,
 			WsMaxReconnect: a.config.Chainlink.WsMaxReconnect,
-		}, logger)
+		}
+
+		chainlinkClient, err := chainlink.NewClient(trackerChainlinkCfg, logger)
 		if err != nil {
 			return fmt.Errorf("create chainlink client for tracker: %w", err)
 		}
@@ -159,11 +189,12 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 		}
 
 		trackerCfg := &tracker.TrackerConfig{
-			MarketPrefixes:     a.config.Polymarket.Tracker.MarketPrefixes,
-			Windows:            a.config.Polymarket.Tracker.Windows,
 			PreScheduleWindows: a.config.Polymarket.Tracker.PreScheduleWindows,
 			CustomFeatures:     a.config.Polymarket.Tracker.CustomFeatures,
 		}
+
+		prefixToFeedID := a.config.PrefixToFeedID()
+		prefixToWindows := a.config.PrefixToWindows()
 
 		gammaClient := gamma.NewClient(gamma.ClientConfig{
 			BaseURL: a.config.Polymarket.GammaURL,
@@ -179,7 +210,8 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 			marketConn,
 			chainlinkClient,
 			trackerCfg,
-			a.config.Chainlink.FeedID,
+			prefixToFeedID,
+			prefixToWindows,
 			a.state,
 			a.persistence,
 			logger,
@@ -189,6 +221,7 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 
 	a.logger.Info().
 		Int("count", len(a.connectors)).
+		Strs("symbols", a.config.Symbols()).
 		Msg("connectors initialized")
 
 	return nil
@@ -197,7 +230,7 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 func (a *App) Run() error {
 	a.logger.Info().
 		Str("mode", a.config.App.Mode).
-		Str("symbol", a.config.App.Symbol).
+		Strs("symbols", a.config.Symbols()).
 		Msg("application starting")
 
 	a.supervisor.SetRunning(true)
@@ -208,6 +241,7 @@ func (a *App) Run() error {
 		Bool("persistence_enabled", a.config.Persistence.Enabled).
 		Bool("kill_switch", a.config.Risk.KillSwitch).
 		Int("connectors", len(a.connectors)).
+		Int("markets", len(a.config.Markets)).
 		Msg("configuration loaded")
 
 	a.state.UpdateMeta(func(m *state.MetaState) {
@@ -228,7 +262,7 @@ func (a *App) Run() error {
 
 	a.logSystemEvent("application_started", map[string]interface{}{
 		"mode":       a.config.App.Mode,
-		"symbol":     a.config.App.Symbol,
+		"symbols":    a.config.Symbols(),
 		"connectors": len(a.connectors),
 	})
 

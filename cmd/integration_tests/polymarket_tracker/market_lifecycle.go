@@ -14,6 +14,8 @@ func (mt *MarketTracker) fetchAndSubscribe(slug, prefix string, window int) erro
 		Int("window", window).
 		Msg("Fetching and subscribing to market")
 
+	feedID := mt.prefixToFeedID[prefix]
+
 	marketData, err := mt.gammaClient.GetMarketBySlug(mt.ctx, slug)
 	if err != nil {
 		return fmt.Errorf("fetch market from gamma: %w", err)
@@ -24,7 +26,7 @@ func (mt *MarketTracker) fetchAndSubscribe(slug, prefix string, window int) erro
 	endTime := startTime.Add(duration)
 
 	startTimestamp := uint64(startTime.Unix())
-	startPrice, err := mt.getChainlinkPriceAtTimestamp(mt.ctx, startTimestamp)
+	startPrice, err := mt.getChainlinkPriceAtTimestamp(mt.ctx, feedID, startTimestamp)
 	if err != nil {
 		mt.logger.Error().
 			Err(err).
@@ -39,6 +41,8 @@ func (mt *MarketTracker) fetchAndSubscribe(slug, prefix string, window int) erro
 		NoAssetID:   marketData.Tokens.DownTokenID,
 		ConditionID: marketData.ConditionID,
 		WindowType:  window,
+		FeedID:      feedID,
+		Prefix:      prefix,
 		StartTime:   startTime,
 		EndTime:     endTime,
 		StartPrice:  startPrice,
@@ -150,7 +154,7 @@ func (mt *MarketTracker) handleMarketEnd(slug string) {
 	mt.mu.Unlock()
 
 	endTimestamp := uint64(activeMarket.EndTime.Unix())
-	endPrice, err := mt.getChainlinkPriceAtTimestamp(mt.ctx, endTimestamp)
+	endPrice, err := mt.getChainlinkPriceAtTimestamp(mt.ctx, activeMarket.FeedID, endTimestamp)
 	if err != nil {
 		mt.logger.Error().
 			Err(err).
@@ -197,6 +201,8 @@ func (mt *MarketTracker) handleMarketEnd(slug string) {
 	completedMarket := &CompletedMarket{
 		Slug:           slug,
 		WindowType:     activeMarket.WindowType,
+		FeedID:         activeMarket.FeedID,
+		Prefix:         activeMarket.Prefix,
 		StartTime:      activeMarket.StartTime,
 		EndTime:        activeMarket.EndTime,
 		YesAssetID:     activeMarket.YesAssetID,

@@ -18,9 +18,11 @@ import (
 )
 
 type Connector struct {
-	name      string
-	config    *TrackerConfig
-	btcFeedID string
+	name   string
+	config *TrackerConfig
+
+	prefixToFeedID  map[string]string
+	prefixToWindows map[string][]int
 
 	gammaClient     *gamma.Client
 	marketConnector *market.Connector
@@ -45,7 +47,8 @@ func NewConnector(
 	marketConnector *market.Connector,
 	chainlinkClient *chainlink.Client,
 	cfg *TrackerConfig,
-	btcFeedID string,
+	prefixToFeedID map[string]string,
+	prefixToWindows map[string][]int,
 	stateStore *state.StateStore,
 	persistWriter *persistence.Writer,
 	baseLogger *zerolog.Logger,
@@ -55,7 +58,8 @@ func NewConnector(
 	return &Connector{
 		name:            "polymarket_tracker",
 		config:          cfg,
-		btcFeedID:       btcFeedID,
+		prefixToFeedID:  prefixToFeedID,
+		prefixToWindows: prefixToWindows,
 		gammaClient:     gammaClient,
 		marketConnector: marketConnector,
 		chainlinkClient: chainlinkClient,
@@ -81,15 +85,19 @@ func (c *Connector) Start(ctx context.Context) error {
 	c.running = true
 	c.mu.Unlock()
 
+	// Collect prefixes and all windows for logging
+	var prefixes []string
+	for prefix := range c.prefixToWindows {
+		prefixes = append(prefixes, prefix)
+	}
+
 	c.logger.Info().
-		Strs("prefixes", c.config.MarketPrefixes).
-		Ints("windows", c.config.Windows).
+		Strs("prefixes", prefixes).
 		Int("pre_schedule_windows", c.config.PreScheduleWindows).
 		Msg("tracker: starting")
 
 	c.logEvent(persistence.EventSystem, "connector_starting", map[string]interface{}{
-		"market_prefixes":      c.config.MarketPrefixes,
-		"windows":              c.config.Windows,
+		"prefix_count":         len(c.prefixToWindows),
 		"pre_schedule_windows": c.config.PreScheduleWindows,
 	})
 
@@ -97,8 +105,8 @@ func (c *Connector) Start(ctx context.Context) error {
 	c.ctx = ctx
 	c.cancel = cancel
 
-	for _, prefix := range c.config.MarketPrefixes {
-		for _, window := range c.config.Windows {
+	for prefix, windows := range c.prefixToWindows {
+		for _, window := range windows {
 			currentSlug := gamma.GetCurrentSlug(prefix, window)
 
 			c.logger.Info().
@@ -193,8 +201,8 @@ func (c *Connector) Health() error {
 	return nil
 }
 
-func (c *Connector) getChainlinkPriceAtTimestamp(ctx context.Context, timestamp uint64) (float64, error) {
-	report, err := c.chainlinkClient.GetReportAtTimestampForFeed(ctx, c.btcFeedID, timestamp)
+func (c *Connector) getChainlinkPriceAtTimestamp(ctx context.Context, feedID string, timestamp uint64) (float64, error) {
+	report, err := c.chainlinkClient.GetReportAtTimestampForFeed(ctx, feedID, timestamp)
 	if err != nil {
 		return 0, fmt.Errorf("get chainlink report: %w", err)
 	}
@@ -208,7 +216,7 @@ func (c *Connector) getChainlinkPriceAtTimestamp(ctx context.Context, timestamp 
 	c.logger.Debug().
 		Uint64("timestamp", timestamp).
 		Float64("price", price).
-		Str("feed_id", c.btcFeedID).
+		Str("feed_id", feedID).
 		Msg("tracker: fetched chainlink price")
 
 	return price, nil

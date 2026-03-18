@@ -15,6 +15,8 @@ func (c *Connector) fetchAndSubscribe(slug, prefix string, window int) error {
 		Int("window", window).
 		Msg("tracker: fetching and subscribing to market")
 
+	feedID := c.prefixToFeedID[prefix]
+
 	marketData, err := c.gammaClient.GetMarketBySlug(c.ctx, slug)
 	if err != nil {
 		return fmt.Errorf("fetch market from gamma: %w", err)
@@ -25,11 +27,12 @@ func (c *Connector) fetchAndSubscribe(slug, prefix string, window int) error {
 	endTime := startTime.Add(duration)
 
 	startTimestamp := uint64(startTime.Unix())
-	startPrice, err := c.getChainlinkPriceAtTimestamp(c.ctx, startTimestamp)
+	startPrice, err := c.getChainlinkPriceAtTimestamp(c.ctx, feedID, startTimestamp)
 	if err != nil {
 		c.logger.Error().
 			Err(err).
 			Uint64("timestamp", startTimestamp).
+			Str("feed_id", feedID).
 			Msg("tracker: failed to get chainlink start price")
 		startPrice = 0
 	}
@@ -40,6 +43,8 @@ func (c *Connector) fetchAndSubscribe(slug, prefix string, window int) error {
 		NoAssetID:   marketData.Tokens.DownTokenID,
 		ConditionID: marketData.ConditionID,
 		WindowType:  window,
+		FeedID:      feedID,
+		Prefix:      prefix,
 		StartTime:   startTime,
 		EndTime:     endTime,
 		StartPrice:  startPrice,
@@ -66,6 +71,7 @@ func (c *Connector) fetchAndSubscribe(slug, prefix string, window int) error {
 	c.logger.Info().
 		Str("slug", slug).
 		Int("window", window).
+		Str("feed_id", feedID).
 		Time("start_time", startTime).
 		Time("end_time", endTime).
 		Dur("duration_remaining", timeUntilEnd).
@@ -151,7 +157,7 @@ func (c *Connector) handleMarketEnd(slug string) {
 	c.mu.Unlock()
 
 	endTimestamp := uint64(activeMarket.EndTime.Unix())
-	endPrice, err := c.getChainlinkPriceAtTimestamp(c.ctx, endTimestamp)
+	endPrice, err := c.getChainlinkPriceAtTimestamp(c.ctx, activeMarket.FeedID, endTimestamp)
 	if err != nil {
 		c.logger.Error().
 			Err(err).
@@ -198,6 +204,9 @@ func (c *Connector) handleMarketEnd(slug string) {
 	completedMarket := &CompletedMarket{
 		Slug:           slug,
 		WindowType:     activeMarket.WindowType,
+		FeedID:         activeMarket.FeedID,
+		Symbol:         activeMarket.Symbol,
+		Prefix:         activeMarket.Prefix,
 		StartTime:      activeMarket.StartTime,
 		EndTime:        activeMarket.EndTime,
 		YesAssetID:     activeMarket.YesAssetID,
@@ -225,6 +234,7 @@ func (c *Connector) handleMarketEnd(slug string) {
 	c.logEvent(persistence.EventState, "market_completed", map[string]interface{}{
 		"slug":             completedMarket.Slug,
 		"window_type":      completedMarket.WindowType,
+		"feed_id":          completedMarket.FeedID,
 		"start_time":       completedMarket.StartTime,
 		"end_time":         completedMarket.EndTime,
 		"start_price":      completedMarket.StartPrice,
