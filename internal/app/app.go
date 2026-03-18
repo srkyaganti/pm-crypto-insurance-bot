@@ -7,6 +7,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/config"
+	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/httpserver"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/binance/perps"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/binance/spot"
@@ -28,8 +29,9 @@ type App struct {
 	state       *state.StateStore
 	persistence *persistence.Writer
 	connectors  []connectors.Connector
-	trackerConn *tracker.Connector
-	running     bool
+	trackerConn   *tracker.Connector
+	chainlinkConn *chainlink.Connector
+	running       bool
 }
 
 func New(cfgPath string) (*App, error) {
@@ -116,6 +118,7 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 		logger,
 	)
 	a.connectors = append(a.connectors, chainlinkConnector)
+	a.chainlinkConn = chainlinkConnector
 
 	// Binance spot connector
 	binanceSpotCfg := &spot.Config{
@@ -298,6 +301,17 @@ func (a *App) Run() error {
 		}
 		sm.Start(ctx)
 		defer sm.Stop()
+	}
+
+	if a.config.HTTPServer.Enabled {
+		httpSrv := httpserver.New(
+			&a.config.HTTPServer,
+			a.state,
+			a.chainlinkConn,
+			a.trackerConn,
+			a.logger,
+		)
+		httpSrv.Start(a.supervisor.Context())
 	}
 
 	a.logSystemEvent("application_started", map[string]interface{}{

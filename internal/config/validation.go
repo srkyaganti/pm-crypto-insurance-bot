@@ -21,6 +21,9 @@ func Validate(cfg *Config) error {
 	if err := validatePersistence(cfg); err != nil {
 		return err
 	}
+	if err := validateHTTPServer(cfg); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -143,6 +146,22 @@ func validatePersistence(cfg *Config) error {
 	}
 	if cfg.Persistence.FlushIntervalMs <= 0 {
 		cfg.Persistence.FlushIntervalMs = 1000
+	}
+	return nil
+}
+
+func validateHTTPServer(cfg *Config) error {
+	if !cfg.HTTPServer.Enabled {
+		return nil
+	}
+	if cfg.HTTPServer.ListenAddr == "" {
+		cfg.HTTPServer.ListenAddr = ":8080"
+	}
+	if cfg.HTTPServer.ReadTimeoutMs <= 0 {
+		cfg.HTTPServer.ReadTimeoutMs = 5000
+	}
+	if cfg.HTTPServer.WriteTimeoutMs <= 0 {
+		cfg.HTTPServer.WriteTimeoutMs = 10000
 	}
 	return nil
 }

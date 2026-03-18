@@ -11,6 +11,7 @@ type Config struct {
 	Risk         RiskConfig         `yaml:"risk"`
 	Persistence  PersistenceConfig  `yaml:"persistence"`
 	Sampler      SamplerConfig      `yaml:"sampler"`
+	HTTPServer   HTTPServerConfig   `yaml:"http_server"`
 }
 
 type PolymarketMarketConfig struct {
@@ -80,6 +81,13 @@ type SamplerConfig struct {
 	Enabled      bool   `yaml:"enabled"`
 	OutputPath   string `yaml:"output_path"`
 	IntervalSecs int    `yaml:"interval_secs"`
+}
+
+type HTTPServerConfig struct {
+	Enabled        bool   `yaml:"enabled"`
+	ListenAddr     string `yaml:"listen_addr"`
+	ReadTimeoutMs  int    `yaml:"read_timeout_ms"`
+	WriteTimeoutMs int    `yaml:"write_timeout_ms"`
 }
 
 type RiskConfig struct {

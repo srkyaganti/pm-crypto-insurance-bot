@@ -17,36 +17,36 @@ markets:
     polymarket:
       prefix: "btc-updown-"
       windows: [5, 15]
-  - symbol: "ETH"
-    chainlink_feed_id: "0x000362205e10b3a147d02792eccee483dca6c7b44ecce7012cb8c6e0b68b3ae9"
-    binance_symbol: "ETHUSDT"
-    polymarket:
-      prefix: "eth-updown-"
-      windows: [5, 15]
-  - symbol: "SOL"
-    chainlink_feed_id: "0x0003b778d3f6b2ac4991302b89cb313f99a42467d6c9c5f96f57c29c0d2bc24f"
-    binance_symbol: "SOLUSDT"
-    polymarket:
-      prefix: "sol-updown-"
-      windows: [5, 15]
-  - symbol: "XRP"
-    chainlink_feed_id: "0x0003c16c6aed42294f5cb4741f6e59ba2d728f0eae2eb9e6d3f555808c59fc45"
-    binance_symbol: "XRPUSDT"
-    polymarket:
-      prefix: "xrp-updown-"
-      windows: [5, 15]
-  - symbol: "DOGE"
-    chainlink_feed_id: "0x000356ca64d3b32135e17dc0dc721a645bf50d0303be8ceb2cdca0a50bab8fdc"
-    binance_symbol: "DOGEUSDT"
-    polymarket:
-      prefix: "doge-updown-"
-      windows: [5, 15]
-  - symbol: "BNB"
-    chainlink_feed_id: "0x000335fd3f3ffa06cfd9297b97367f77145d7a5f132e84c736cc471dd98621fe"
-    binance_symbol: "BNBUSDT"
-    polymarket:
-      prefix: "bnb-updown-"
-      windows: [5, 15]
+#  - symbol: "ETH"
+#    chainlink_feed_id: "0x000362205e10b3a147d02792eccee483dca6c7b44ecce7012cb8c6e0b68b3ae9"
+#    binance_symbol: "ETHUSDT"
+#    polymarket:
+#      prefix: "eth-updown-"
+#      windows: [5, 15]
+#  - symbol: "SOL"
+#    chainlink_feed_id: "0x0003b778d3f6b2ac4991302b89cb313f99a42467d6c9c5f96f57c29c0d2bc24f"
+#    binance_symbol: "SOLUSDT"
+#    polymarket:
+#      prefix: "sol-updown-"
+#      windows: [5, 15]
+#  - symbol: "XRP"
+#    chainlink_feed_id: "0x0003c16c6aed42294f5cb4741f6e59ba2d728f0eae2eb9e6d3f555808c59fc45"
+#    binance_symbol: "XRPUSDT"
+#    polymarket:
+#      prefix: "xrp-updown-"
+#      windows: [5, 15]
+#  - symbol: "DOGE"
+#    chainlink_feed_id: "0x000356ca64d3b32135e17dc0dc721a645bf50d0303be8ceb2cdca0a50bab8fdc"
+#    binance_symbol: "DOGEUSDT"
+#    polymarket:
+#      prefix: "doge-updown-"
+#      windows: [5, 15]
+#  - symbol: "BNB"
+#    chainlink_feed_id: "0x000335fd3f3ffa06cfd9297b97367f77145d7a5f132e84c736cc471dd98621fe"
+#    binance_symbol: "BNBUSDT"
+#    polymarket:
+#      prefix: "bnb-updown-"
+#      windows: [5, 15]
 
 chainlink:
   rest_url: "https://api.dataengine.chain.link"
@@ -104,3 +104,9 @@ sampler:
   enabled: true
   output_path: "./logs/snapshots.ndjson"
   interval_secs: 2
+
+http_server:
+  enabled: true
+  listen_addr: ":8080"
+  read_timeout_ms: 5000
+  write_timeout_ms: 10000
