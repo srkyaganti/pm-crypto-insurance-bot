@@ -12,6 +12,7 @@ type Config struct {
 	Risk         RiskConfig         `yaml:"risk"`
 	Persistence  PersistenceConfig  `yaml:"persistence"`
 	Sampler      SamplerConfig      `yaml:"sampler"`
+	Recorder     RecorderConfig     `yaml:"recorder"`
 	HTTPServer   HTTPServerConfig   `yaml:"http_server"`
 }
 
@@ -93,6 +94,12 @@ type TrackerConfig struct {
 type SamplerConfig struct {
 	Enabled      bool   `yaml:"enabled"`
 	OutputPath   string `yaml:"output_path"`
+	IntervalSecs int    `yaml:"interval_secs"`
+}
+
+type RecorderConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	OutputDir    string `yaml:"output_dir"`
 	IntervalSecs int    `yaml:"interval_secs"`
 }
 

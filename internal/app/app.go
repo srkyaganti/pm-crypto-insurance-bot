@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/config"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/engine"
+	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/recorder"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/httpserver"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/binance/perps"
@@ -33,6 +34,7 @@ type App struct {
 	trackerConn   *tracker.Connector
 	chainlinkConn *chainlink.Connector
 	decisionEngine *engine.Engine
+	recorder       *recorder.Recorder
 	running       bool
 }
 
@@ -82,6 +84,21 @@ func New(cfgPath string) (*App, error) {
 	if cfg.Strategy.Enabled && app.trackerConn != nil {
 		engineLogger := logging.Component(logger, "engine")
 		app.decisionEngine = engine.NewEngine(app.state, app.trackerConn, &cfg.Strategy, app.persistence, engineLogger)
+	}
+
+	if cfg.Recorder.Enabled && app.trackerConn != nil {
+		recorderLogger := logging.Component(logger, "recorder")
+		getWindows := func() []tracker.ActiveWindowSummary {
+			return app.trackerConn.GetActiveWindowSummaries()
+		}
+		symbols := cfg.Symbols()
+		interval := time.Duration(cfg.Recorder.IntervalSecs) * time.Second
+		rec, err := recorder.New(app.state, getWindows, symbols, interval, cfg.Recorder.OutputDir, recorderLogger)
+		if err != nil {
+			logger.Error().Err(err).Msg("failed to initialize recorder")
+		} else {
+			app.recorder = rec
+		}
 	}
 
 	return app, nil
@@ -376,6 +393,16 @@ func (a *App) runLoop() error {
 			defer a.supervisor.Done()
 			if err := a.decisionEngine.Run(ctx); err != nil {
 				a.logger.Error().Err(err).Msg("decision engine error")
+			}
+		}()
+	}
+
+	if a.recorder != nil {
+		a.supervisor.Add(1)
+		go func() {
+			defer a.supervisor.Done()
+			if err := a.recorder.Run(ctx); err != nil {
+				a.logger.Error().Err(err).Msg("recorder error")
 			}
 		}()
 	}
