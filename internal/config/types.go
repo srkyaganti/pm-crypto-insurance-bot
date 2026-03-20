@@ -17,15 +17,15 @@ type Config struct {
 }
 
 type StrategyConfig struct {
-	Enabled                   bool               `yaml:"enabled"`
-	EntryWindowMinSecs        int                `yaml:"entry_window_min_secs"`
-	EntryWindowMaxSecs        int                `yaml:"entry_window_max_secs"`
-	MinPMConfidence           map[string]float64 `yaml:"min_pm_confidence"`
-	MaxCLBinanceDivergencePct map[string]float64 `yaml:"max_cl_binance_divergence_pct"`
-	DepthSafetyMultiplier     map[string]float64 `yaml:"depth_safety_multiplier"`
-	MinDepth                  map[string]float64 `yaml:"min_depth"`
-	MaxSharesPerTrade         int                `yaml:"max_shares_per_trade"`
-	MaxConcurrentPositions    int                `yaml:"max_concurrent_positions"`
+	Enabled                   bool               `yaml:"enabled" json:"enabled"`
+	EntryWindowMinSecs        int                `yaml:"entry_window_min_secs" json:"entry_window_min_secs"`
+	EntryWindowMaxSecs        int                `yaml:"entry_window_max_secs" json:"entry_window_max_secs"`
+	MinPMConfidence           map[string]float64 `yaml:"min_pm_confidence" json:"min_pm_confidence"`
+	MaxCLBinanceDivergencePct map[string]float64 `yaml:"max_cl_binance_divergence_pct" json:"max_cl_binance_divergence_pct"`
+	DepthSafetyMultiplier     map[string]float64 `yaml:"depth_safety_multiplier" json:"depth_safety_multiplier"`
+	MinDepth                  map[string]float64 `yaml:"min_depth" json:"min_depth"`
+	MaxSharesPerTrade         int                `yaml:"max_shares_per_trade" json:"max_shares_per_trade"`
+	MaxConcurrentPositions    int                `yaml:"max_concurrent_positions" json:"max_concurrent_positions"`
 }
 
 type PolymarketMarketConfig struct {

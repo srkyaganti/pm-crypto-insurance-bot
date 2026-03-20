@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,11 +17,42 @@ import (
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/recorder"
 )
 
-type Request struct {
-	DataDir  string
-	From     time.Time
-	To       time.Time
+// --- Request types ---
+
+type SweepRequest struct {
+	DataDir string
+	From    time.Time
+	To      time.Time
+	Configs []ConfigEntry
+}
+
+type ConfigEntry struct {
+	ID       string
 	Strategy config.StrategyConfig
+}
+
+// --- Response types ---
+
+type SweepResult struct {
+	Metadata Metadata           `json:"metadata"`
+	Results  map[string]*Result `json:"results"`
+	Ranking  []RankEntry        `json:"ranking"`
+}
+
+type Metadata struct {
+	From             time.Time `json:"from"`
+	To               time.Time `json:"to"`
+	FilesProcessed   int       `json:"files_processed"`
+	FileNames        []string  `json:"file_names"`
+	TotalSnapshots   int       `json:"total_snapshots"`
+	ProcessingTimeMs int64     `json:"processing_time_ms"`
+}
+
+type RankEntry struct {
+	ConfigID string  `json:"config_id"`
+	PnL      float64 `json:"pnl"`
+	WinRate  float64 `json:"win_rate"`
+	Trades   int     `json:"trades"`
 }
 
 type TradeEntry struct {
@@ -48,6 +80,18 @@ type Summary struct {
 	Wins             int            `json:"wins"`
 	Losses           int            `json:"losses"`
 	Unresolved       int            `json:"unresolved"`
+
+	// Verbose fields for AI analysis
+	WinRate        float64                `json:"win_rate"`
+	AvgEntryPrice  float64                `json:"avg_entry_price"`
+	AvgPnLPerTrade float64                `json:"avg_pnl_per_trade"`
+	BestTradePnL   float64                `json:"best_trade_pnl"`
+	WorstTradePnL  float64                `json:"worst_trade_pnl"`
+	BestTradeSlug  string                 `json:"best_trade_slug"`
+	WorstTradeSlug string                 `json:"worst_trade_slug"`
+	TradesByWindow map[string]int         `json:"trades_by_window"`
+	GatePassRates  map[string]float64     `json:"gate_pass_rates"`
+	ConfigUsed     config.StrategyConfig  `json:"config_used"`
 }
 
 type Result struct {
@@ -55,7 +99,8 @@ type Result struct {
 	Summary Summary      `json:"summary"`
 }
 
-// openPosition tracks an unresolved trade during replay.
+// --- Internal types ---
+
 type openPosition struct {
 	tradeIdx    int
 	startPrice  float64
@@ -64,9 +109,14 @@ type openPosition struct {
 	lastSeen    time.Time
 }
 
-// evaluator wraps StrategyConfig for gate evaluation (same logic as engine.runGates).
 type evaluator struct {
 	cfg *config.StrategyConfig
+}
+
+type configState struct {
+	ev        *evaluator
+	result    *Result
+	positions map[string]*openPosition
 }
 
 func (ev *evaluator) symbolFloat(m map[string]float64, symbol string) float64 {
@@ -112,8 +162,10 @@ func (ev *evaluator) runGates(w tracker.ActiveWindowSummary, sig engine.MarketSi
 	}
 }
 
-// Run replays recorded data through the engine's signal + gate logic.
-func Run(req Request) (*Result, error) {
+// Sweep replays recorded data through the engine's signal + gate logic for multiple configs in a single pass.
+func Sweep(req SweepRequest) (*SweepResult, error) {
+	startTime := time.Now()
+
 	files, err := selectFiles(req.DataDir, req.From, req.To)
 	if err != nil {
 		return nil, fmt.Errorf("select files: %w", err)
@@ -122,37 +174,70 @@ func Run(req Request) (*Result, error) {
 		return nil, fmt.Errorf("no data files found in %s for range %s to %s", req.DataDir, req.From, req.To)
 	}
 
-	ev := &evaluator{cfg: &req.Strategy}
-	result := &Result{
-		Summary: Summary{
-			TradesBySymbol:  make(map[string]int),
-			RejectionCounts: make(map[string]int),
-		},
+	// Initialize per-config state.
+	states := make([]configState, len(req.Configs))
+	for i, ce := range req.Configs {
+		states[i] = configState{
+			ev: &evaluator{cfg: &req.Configs[i].Strategy},
+			result: &Result{
+				Summary: Summary{
+					TradesBySymbol:  make(map[string]int),
+					RejectionCounts: make(map[string]int),
+					TradesByWindow:  make(map[string]int),
+					ConfigUsed:      ce.Strategy,
+				},
+			},
+			positions: make(map[string]*openPosition),
+		}
 	}
-	positions := make(map[string]*openPosition)
+
+	globalSnapCount := 0
+
+	fileNames := make([]string, len(files))
+	for i, f := range files {
+		fileNames[i] = filepath.Base(f)
+	}
 
 	for _, f := range files {
-		if err := processFile(f, req.From, req.To, ev, result, positions); err != nil {
+		if err := sweepFile(f, req.From, req.To, states, &globalSnapCount); err != nil {
 			return nil, fmt.Errorf("process %s: %w", filepath.Base(f), err)
 		}
 	}
 
-	// Resolve remaining open positions with last known CL price.
-	for slug, pos := range positions {
-		resolvePosition(result, pos, pos.lastCLPrice, pos.lastSeen)
-		delete(positions, slug)
-	}
+	// Post-processing per config.
+	results := make(map[string]*Result, len(req.Configs))
+	for i, ce := range req.Configs {
+		cs := &states[i]
 
-	for _, t := range result.Trades {
-		if !t.Resolved {
-			result.Summary.Unresolved++
+		// Resolve remaining open positions.
+		for slug, pos := range cs.positions {
+			resolvePosition(cs.result, pos, pos.lastCLPrice, pos.lastSeen)
+			delete(cs.positions, slug)
 		}
+
+		cs.result.Summary.TotalSnapshots = globalSnapCount
+		computeVerboseSummary(cs.result)
+		results[ce.ID] = cs.result
 	}
 
-	return result, nil
+	// Build ranking sorted by PnL descending.
+	ranking := buildRanking(req.Configs, results)
+
+	return &SweepResult{
+		Metadata: Metadata{
+			From:             req.From,
+			To:               req.To,
+			FilesProcessed:   len(files),
+			FileNames:        fileNames,
+			TotalSnapshots:   globalSnapCount,
+			ProcessingTimeMs: time.Since(startTime).Milliseconds(),
+		},
+		Results: results,
+		Ranking: ranking,
+	}, nil
 }
 
-func processFile(path string, from, to time.Time, ev *evaluator, result *Result, positions map[string]*openPosition) error {
+func sweepFile(path string, from, to time.Time, states []configState, globalSnapCount *int) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return err
@@ -173,7 +258,7 @@ func processFile(path string, from, to time.Time, ev *evaluator, result *Result,
 			continue
 		}
 
-		result.Summary.TotalSnapshots++
+		*globalSnapCount++
 
 		activeSlugs := make(map[string]bool, len(snap.Markets))
 
@@ -185,72 +270,82 @@ func processFile(path string, from, to time.Time, ev *evaluator, result *Result,
 				continue
 			}
 
-			// Update open position tracking.
-			if pos, exists := positions[mkt.Slug]; exists {
-				pos.lastCLPrice = symData.Chainlink.Price
-				pos.lastSeen = snapTime
-
-				if mkt.TimeRemainingS <= 0 {
-					resolvePosition(result, pos, symData.Chainlink.Price, snapTime)
-					delete(positions, mkt.Slug)
-					continue
-				}
-			}
-
-			// Convert snapshot data to state types.
+			// Shared work: convert ONCE per market.
 			w := convertMarket(mkt)
-			if _, exists := positions[mkt.Slug]; exists {
-				w.HasPosition = true
-			}
-
 			clState := convertChainlink(symData.Chainlink)
 			spotState := convertSpot(symData.BinanceSpot)
 			perpsState := convertPerps(symData.BinancePerps)
-
 			signals := engine.ComputeSignals(w, clState, spotState, perpsState)
-			decision := ev.runGates(w, signals)
 
-			result.Summary.TotalEvaluations++
+			// Per-config evaluation.
+			for ci := range states {
+				cs := &states[ci]
 
-			if decision.ShouldTrade {
-				var entryPrice float64
-				if decision.Side == "YES" {
-					entryPrice = mkt.YesAsk
+				// Update open position tracking.
+				if pos, exists := cs.positions[mkt.Slug]; exists {
+					pos.lastCLPrice = symData.Chainlink.Price
+					pos.lastSeen = snapTime
+
+					if mkt.TimeRemainingS <= 0 {
+						resolvePosition(cs.result, pos, symData.Chainlink.Price, snapTime)
+						delete(cs.positions, mkt.Slug)
+						continue
+					}
+				}
+
+				// Set HasPosition per config.
+				wCopy := w
+				if _, exists := cs.positions[mkt.Slug]; exists {
+					wCopy.HasPosition = true
+				}
+
+				decision := cs.ev.runGates(wCopy, signals)
+				cs.result.Summary.TotalEvaluations++
+
+				if decision.ShouldTrade {
+					var entryPrice float64
+					if decision.Side == "YES" {
+						entryPrice = mkt.YesAsk
+					} else {
+						entryPrice = mkt.NoAsk
+					}
+
+					trade := TradeEntry{
+						Timestamp:  snapTime,
+						Slug:       mkt.Slug,
+						Symbol:     mkt.Symbol,
+						Side:       decision.Side,
+						EntryPrice: entryPrice,
+						StartPrice: mkt.StartPrice,
+						Shares:     cs.ev.cfg.MaxSharesPerTrade,
+						Signals:    signals,
+					}
+					cs.result.Trades = append(cs.result.Trades, trade)
+					cs.result.Summary.TotalTrades++
+					cs.result.Summary.TradesBySymbol[mkt.Symbol]++
+					cs.result.Summary.TradesByWindow[classifyWindow(mkt.Slug)]++
+
+					cs.positions[mkt.Slug] = &openPosition{
+						tradeIdx:    len(cs.result.Trades) - 1,
+						startPrice:  mkt.StartPrice,
+						side:        decision.Side,
+						lastCLPrice: symData.Chainlink.Price,
+						lastSeen:    snapTime,
+					}
 				} else {
-					entryPrice = mkt.NoAsk
+					cs.result.Summary.RejectionCounts[decision.RejectReason]++
 				}
-
-				trade := TradeEntry{
-					Timestamp:  snapTime,
-					Slug:       mkt.Slug,
-					Symbol:     mkt.Symbol,
-					Side:       decision.Side,
-					EntryPrice: entryPrice,
-					StartPrice: mkt.StartPrice,
-					Shares:     ev.cfg.MaxSharesPerTrade,
-					Signals:    signals,
-				}
-				result.Trades = append(result.Trades, trade)
-				result.Summary.TotalTrades++
-				result.Summary.TradesBySymbol[mkt.Symbol]++
-
-				positions[mkt.Slug] = &openPosition{
-					tradeIdx:    len(result.Trades) - 1,
-					startPrice:  mkt.StartPrice,
-					side:        decision.Side,
-					lastCLPrice: symData.Chainlink.Price,
-					lastSeen:    snapTime,
-				}
-			} else {
-				result.Summary.RejectionCounts[decision.RejectReason]++
 			}
 		}
 
 		// Resolve positions for markets that disappeared from this snapshot.
-		for slug, pos := range positions {
-			if !activeSlugs[slug] {
-				resolvePosition(result, pos, pos.lastCLPrice, pos.lastSeen)
-				delete(positions, slug)
+		for ci := range states {
+			cs := &states[ci]
+			for slug, pos := range cs.positions {
+				if !activeSlugs[slug] {
+					resolvePosition(cs.result, pos, pos.lastCLPrice, pos.lastSeen)
+					delete(cs.positions, slug)
+				}
 			}
 		}
 	}
@@ -277,6 +372,124 @@ func resolvePosition(result *Result, pos *openPosition, finalCLPrice float64, re
 		result.Summary.Losses++
 	}
 	result.Summary.SimulatedPnL += trade.PnL
+}
+
+func computeVerboseSummary(result *Result) {
+	s := &result.Summary
+
+	// Unresolved count.
+	for _, t := range result.Trades {
+		if !t.Resolved {
+			s.Unresolved++
+		}
+	}
+
+	// Win rate.
+	resolved := s.Wins + s.Losses
+	if resolved > 0 {
+		s.WinRate = float64(s.Wins) / float64(resolved)
+	}
+
+	// Entry price and PnL stats.
+	if len(result.Trades) > 0 {
+		var totalEntry float64
+		bestPnL := -math.MaxFloat64
+		worstPnL := math.MaxFloat64
+
+		for _, t := range result.Trades {
+			totalEntry += t.EntryPrice
+
+			if t.Resolved {
+				if t.PnL > bestPnL {
+					bestPnL = t.PnL
+					s.BestTradeSlug = t.Slug
+				}
+				if t.PnL < worstPnL {
+					worstPnL = t.PnL
+					s.WorstTradeSlug = t.Slug
+				}
+			}
+		}
+
+		s.AvgEntryPrice = totalEntry / float64(len(result.Trades))
+
+		if resolved > 0 {
+			s.AvgPnLPerTrade = s.SimulatedPnL / float64(resolved)
+		}
+
+		if bestPnL != -math.MaxFloat64 {
+			s.BestTradePnL = bestPnL
+		}
+		if worstPnL != math.MaxFloat64 {
+			s.WorstTradePnL = worstPnL
+		}
+	}
+
+	// Gate pass rates.
+	s.GatePassRates = computeGatePassRates(s)
+}
+
+// computeGatePassRates calculates what percentage of evaluations passed each gate.
+// Gate N's denominator = evaluations that reached gate N (total - rejections at prior gates).
+func computeGatePassRates(s *Summary) map[string]float64 {
+	gates := []string{
+		"gate1_time_window",
+		"gate2_existing_position",
+		"gate3_pm_confidence",
+		"gate4_cl_binance_agreement",
+		"gate5_expected_move_unavailable",
+		"gate5_gap_too_small",
+		"gate5_depth_too_thin",
+		"gate6_liquidation_cascade",
+	}
+
+	rates := make(map[string]float64, len(gates))
+	remaining := s.TotalEvaluations
+
+	for _, gate := range gates {
+		if remaining <= 0 {
+			break
+		}
+		rejected := s.RejectionCounts[gate]
+		passed := remaining - rejected
+		rates[gate] = float64(passed) / float64(remaining)
+		remaining = passed
+	}
+
+	return rates
+}
+
+// classifyWindow returns "5m", "15m", etc. based on the slug format (e.g. "btc-updown-5min-...").
+func classifyWindow(slug string) string {
+	parts := strings.Split(slug, "-")
+	for _, p := range parts {
+		if strings.HasSuffix(p, "min") {
+			return strings.TrimSuffix(p, "in") // "5min" -> "5m"
+		}
+	}
+	return "unknown"
+}
+
+func buildRanking(configs []ConfigEntry, results map[string]*Result) []RankEntry {
+	ranking := make([]RankEntry, 0, len(configs))
+	for _, ce := range configs {
+		r := results[ce.ID]
+		resolved := r.Summary.Wins + r.Summary.Losses
+		var winRate float64
+		if resolved > 0 {
+			winRate = float64(r.Summary.Wins) / float64(resolved)
+		}
+		ranking = append(ranking, RankEntry{
+			ConfigID: ce.ID,
+			PnL:      r.Summary.SimulatedPnL,
+			WinRate:  winRate,
+			Trades:   r.Summary.TotalTrades,
+		})
+	}
+	sort.Slice(ranking, func(i, j int) bool {
+		return ranking[i].PnL > ranking[j].PnL
+	})
+	return ranking
 }
 
 func selectFiles(dataDir string, from, to time.Time) ([]string, error) {

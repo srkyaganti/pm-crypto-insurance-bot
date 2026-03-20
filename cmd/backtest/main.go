@@ -39,13 +39,13 @@ func main() {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /data", srv.handleData)
-	mux.HandleFunc("POST /run", srv.handleRun)
+	mux.HandleFunc("POST /sweep", srv.handleSweep)
 
 	httpServer := &http.Server{
 		Addr:         *addr,
 		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		WriteTimeout: 600 * time.Second,
 	}
 
 	fmt.Printf("backtest server listening on %s (data: %s)\n", *addr, defaultDataDir)
@@ -59,14 +59,15 @@ type server struct {
 	defaultDataDir  string
 }
 
-type runRequest struct {
-	From              string             `json:"from"`
-	To                string             `json:"to"`
-	DataDir           string             `json:"data_dir"`
-	StrategyOverrides *strategyOverrides `json:"strategy_overrides"`
+type sweepRequest struct {
+	From    string           `json:"from"`
+	To      string           `json:"to"`
+	DataDir string           `json:"data_dir"`
+	Configs []configOverride `json:"configs"`
 }
 
-type strategyOverrides struct {
+type configOverride struct {
+	ID                        string             `json:"id"`
 	EntryWindowMinSecs        *int               `json:"entry_window_min_secs"`
 	EntryWindowMaxSecs        *int               `json:"entry_window_max_secs"`
 	MinPMConfidence           map[string]float64 `json:"min_pm_confidence"`
@@ -136,11 +137,29 @@ func (s *server) handleData(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) handleRun(w http.ResponseWriter, r *http.Request) {
-	var req runRequest
+func (s *server) handleSweep(w http.ResponseWriter, r *http.Request) {
+	var req sweepRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid JSON: %v", err))
 		return
+	}
+
+	// Validate configs.
+	if len(req.Configs) == 0 {
+		writeError(w, http.StatusBadRequest, "configs array must be non-empty")
+		return
+	}
+	seen := make(map[string]bool, len(req.Configs))
+	for _, c := range req.Configs {
+		if c.ID == "" {
+			writeError(w, http.StatusBadRequest, "each config must have a non-empty 'id'")
+			return
+		}
+		if seen[c.ID] {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("duplicate config id: %q", c.ID))
+			return
+		}
+		seen[c.ID] = true
 	}
 
 	from, err := time.Parse(time.RFC3339, req.From)
@@ -159,13 +178,20 @@ func (s *server) handleRun(w http.ResponseWriter, r *http.Request) {
 		dataDir = req.DataDir
 	}
 
-	strategy := s.mergeOverrides(req.StrategyOverrides)
+	// Build config entries by merging overrides onto defaults.
+	entries := make([]backtest.ConfigEntry, len(req.Configs))
+	for i, co := range req.Configs {
+		entries[i] = backtest.ConfigEntry{
+			ID:       co.ID,
+			Strategy: s.mergeOverrides(&co),
+		}
+	}
 
-	result, err := backtest.Run(backtest.Request{
-		DataDir:  dataDir,
-		From:     from,
-		To:       to,
-		Strategy: strategy,
+	result, err := backtest.Sweep(backtest.SweepRequest{
+		DataDir: dataDir,
+		From:    from,
+		To:      to,
+		Configs: entries,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -175,7 +201,7 @@ func (s *server) handleRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func (s *server) mergeOverrides(overrides *strategyOverrides) config.StrategyConfig {
+func (s *server) mergeOverrides(overrides *configOverride) config.StrategyConfig {
 	cfg := s.defaultStrategy
 
 	// Deep copy maps to avoid mutating defaults.
