@@ -101,6 +101,10 @@ type RecorderConfig struct {
 	Enabled      bool   `yaml:"enabled"`
 	OutputDir    string `yaml:"output_dir"`
 	IntervalSecs int    `yaml:"interval_secs"`
+	S3Enabled    bool   `yaml:"s3_enabled"`
+	S3Bucket     string `yaml:"s3_bucket"`
+	S3Region     string `yaml:"s3_region"`
+	S3Prefix     string `yaml:"s3_prefix"`
 }
 
 type HTTPServerConfig struct {

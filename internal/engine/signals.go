@@ -40,6 +40,7 @@ func ComputeSignals(
 	}
 
 	liquidityToFlip := spotState.LiquidityToPrice(startPrice)
+	bookImbalance := spotState.BookImbalanceNearPrice(startPrice, 0.1)
 	expectedMove := EstimateExpectedMove(clState.Ticks, w.TimeRemainingS, clPrice)
 
 	return MarketSignals{
@@ -54,6 +55,7 @@ func ComputeSignals(
 		DivergencePct:     divergencePct,
 		CLBinanceAgree:    clBinanceAgree,
 		LiquidityToFlip:   liquidityToFlip,
+		BookImbalance:     bookImbalance,
 		ExpectedMove:      expectedMove,
 		LiquidationActive: perpsState.LiquidationFlag,
 		TimeRemainingS:    w.TimeRemainingS,

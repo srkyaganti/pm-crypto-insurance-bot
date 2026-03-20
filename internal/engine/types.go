@@ -13,6 +13,7 @@ type MarketSignals struct {
 	DivergencePct     float64 `json:"divergence_pct"`
 	CLBinanceAgree    bool    `json:"cl_binance_agree"`
 	LiquidityToFlip   float64 `json:"liquidity_to_flip"`
+	BookImbalance     float64 `json:"book_imbalance"`
 	ExpectedMove      float64 `json:"expected_move"`
 	LiquidationActive bool    `json:"liquidation_active"`
 	TimeRemainingS    int64   `json:"time_remaining_s"`

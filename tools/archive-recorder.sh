@@ -7,8 +7,11 @@ set -euo pipefail
 DATA_DIR="${1:?Usage: archive-recorder.sh <data_dir> <s3_path>}"
 S3_PATH="${2:?Usage: archive-recorder.sh <data_dir> <s3_path>}"
 
-# Current hour's file is still being written — skip it.
-CURRENT_FILE="data-$(date -u +%Y-%m-%d-%H).ndjson"
+# Current 15-minute slot's file is still being written — skip it.
+# Compute slot start: truncate current minute to nearest 15.
+CURRENT_MIN=$(date -u +%M)
+SLOT_MIN=$(printf "%02d" $(( (CURRENT_MIN / 15) * 15 )))
+CURRENT_FILE="data-$(date -u +%Y-%m-%d-%H)-${SLOT_MIN}.ndjson"
 
 archived=0
 deleted_empty=0

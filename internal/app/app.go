@@ -93,7 +93,13 @@ func New(cfgPath string) (*App, error) {
 		}
 		symbols := cfg.Symbols()
 		interval := time.Duration(cfg.Recorder.IntervalSecs) * time.Second
-		rec, err := recorder.New(app.state, getWindows, symbols, interval, cfg.Recorder.OutputDir, recorderLogger)
+		s3Cfg := recorder.S3Config{
+			Enabled: cfg.Recorder.S3Enabled,
+			Bucket:  cfg.Recorder.S3Bucket,
+			Region:  cfg.Recorder.S3Region,
+			Prefix:  cfg.Recorder.S3Prefix,
+		}
+		rec, err := recorder.New(app.state, getWindows, symbols, interval, cfg.Recorder.OutputDir, s3Cfg, recorderLogger)
 		if err != nil {
 			logger.Error().Err(err).Msg("failed to initialize recorder")
 		} else {

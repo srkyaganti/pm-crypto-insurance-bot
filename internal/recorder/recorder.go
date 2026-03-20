@@ -7,18 +7,22 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/rs/zerolog"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/polymarket/tracker"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/state"
 )
 
 type RecorderSnapshot struct {
-	TS      int64                    `json:"ts"`
-	TsISO   string                   `json:"ts_iso"`
-	Symbols map[string]SymbolData    `json:"symbols"`
-	Markets []MarketData             `json:"markets"`
+	TS      int64                 `json:"ts"`
+	TsISO   string                `json:"ts_iso"`
+	Symbols map[string]SymbolData `json:"symbols"`
+	Markets []MarketData          `json:"markets"`
 }
 
 type SymbolData struct {
@@ -58,15 +62,32 @@ type PerpsData struct {
 	Stale           bool    `json:"stale"`
 }
 
+type PMLevelData struct {
+	Price float64 `json:"price"`
+	Size  float64 `json:"size"`
+}
+
 type MarketData struct {
-	Slug           string  `json:"slug"`
-	Symbol         string  `json:"symbol"`
-	StartPrice     float64 `json:"start_price"`
-	TimeRemainingS int64   `json:"time_remaining_s"`
-	YesBid         float64 `json:"yes_bid"`
-	YesAsk         float64 `json:"yes_ask"`
-	NoBid          float64 `json:"no_bid"`
-	NoAsk          float64 `json:"no_ask"`
+	Slug           string        `json:"slug"`
+	Symbol         string        `json:"symbol"`
+	StartPrice     float64       `json:"start_price"`
+	TimeRemainingS int64         `json:"time_remaining_s"`
+	YesBid         float64       `json:"yes_bid"`
+	YesAsk         float64       `json:"yes_ask"`
+	NoBid          float64       `json:"no_bid"`
+	NoAsk          float64       `json:"no_ask"`
+	YesBids        []PMLevelData `json:"yes_bids,omitempty"`
+	YesAsks        []PMLevelData `json:"yes_asks,omitempty"`
+	NoBids         []PMLevelData `json:"no_bids,omitempty"`
+	NoAsks         []PMLevelData `json:"no_asks,omitempty"`
+}
+
+// S3Config holds optional S3 archival settings.
+type S3Config struct {
+	Enabled  bool
+	Bucket   string
+	Region   string
+	Prefix   string
 }
 
 type Recorder struct {
@@ -75,13 +96,16 @@ type Recorder struct {
 	symbols    []string
 	interval   time.Duration
 	outputDir  string
+	s3         S3Config
+	s3Client   *s3.Client
 	logger     zerolog.Logger
 
-	currentFile *os.File
-	currentHour int
-	enc         *json.Encoder
-	buf         *bufio.Writer
-	tickCount   int
+	currentFile  *os.File
+	currentSlot  int64 // unique slot ID for 15-minute rotation
+	currentFname string
+	enc          *json.Encoder
+	buf          *bufio.Writer
+	tickCount    int
 }
 
 func New(
@@ -90,6 +114,7 @@ func New(
 	symbols []string,
 	interval time.Duration,
 	outputDir string,
+	s3 S3Config,
 	logger *zerolog.Logger,
 ) (*Recorder, error) {
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -102,8 +127,9 @@ func New(
 		symbols:     symbols,
 		interval:    interval,
 		outputDir:   outputDir,
+		s3:          s3,
 		logger:      logger.With().Str("component", "recorder").Logger(),
-		currentHour: -1,
+		currentSlot: -1,
 	}, nil
 }
 
@@ -112,7 +138,29 @@ func (r *Recorder) Run(ctx context.Context) error {
 		Str("output_dir", r.outputDir).
 		Dur("interval", r.interval).
 		Strs("symbols", r.symbols).
+		Bool("s3_enabled", r.s3.Enabled).
 		Msg("recorder starting")
+
+	if r.s3.Enabled {
+		cfg, err := awsconfig.LoadDefaultConfig(ctx,
+			awsconfig.WithRegion(r.s3.Region),
+			awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+				os.Getenv("AWS_ACCESS_KEY_ID"),
+				os.Getenv("AWS_SECRET_ACCESS_KEY"),
+				"",
+			)),
+		)
+		if err != nil {
+			return fmt.Errorf("load AWS config: %w", err)
+		}
+		r.s3Client = s3.NewFromConfig(cfg)
+		r.logger.Info().
+			Str("bucket", r.s3.Bucket).
+			Str("region", r.s3.Region).
+			Str("prefix", r.s3.Prefix).
+			Msg("s3 archival enabled")
+		go r.archiveLoop(ctx)
+	}
 
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
@@ -202,9 +250,10 @@ func (r *Recorder) capture() {
 
 	// PM markets
 	windows := r.getWindows()
+	pmState := r.state.GetPolymarket()
 	markets := make([]MarketData, len(windows))
 	for i, w := range windows {
-		markets[i] = MarketData{
+		md := MarketData{
 			Slug:           w.Slug,
 			Symbol:         w.Symbol,
 			StartPrice:     w.StartPrice,
@@ -214,6 +263,17 @@ func (r *Recorder) capture() {
 			NoBid:          w.NoBid,
 			NoAsk:          w.NoAsk,
 		}
+
+		if ob := pmState.OrderBooks[w.YesAssetID]; ob != nil {
+			md.YesBids = convertPMLevels(ob.Bids)
+			md.YesAsks = convertPMLevels(ob.Asks)
+		}
+		if ob := pmState.OrderBooks[w.NoAssetID]; ob != nil {
+			md.NoBids = convertPMLevels(ob.Bids)
+			md.NoAsks = convertPMLevels(ob.Asks)
+		}
+
+		markets[i] = md
 	}
 	snap.Markets = markets
 
@@ -228,16 +288,28 @@ func (r *Recorder) capture() {
 	}
 }
 
+// slotID returns a unique int for the 15-minute slot containing the given time.
+func slotID(t time.Time) int64 {
+	return t.Unix() / (15 * 60)
+}
+
+// slotFilename returns the filename for the 15-minute slot containing the given time.
+// Format: data-2026-03-19-08-15.ndjson (the minute is the slot start: 00, 15, 30, 45).
+func slotFilename(t time.Time) string {
+	slotStart := t.Truncate(15 * time.Minute)
+	return fmt.Sprintf("data-%s.ndjson", slotStart.Format("2006-01-02-15-04"))
+}
+
 func (r *Recorder) rotateIfNeeded(now time.Time) error {
-	hour := now.Hour() + now.YearDay()*24 + now.Year()*366*24
-	if r.currentFile != nil && r.currentHour == hour {
+	slot := slotID(now)
+	if r.currentFile != nil && r.currentSlot == slot {
 		return nil
 	}
 
 	r.flush()
 	r.closeFile()
 
-	filename := fmt.Sprintf("data-%s.ndjson", now.Format("2006-01-02-15"))
+	filename := slotFilename(now)
 	path := filepath.Join(r.outputDir, filename)
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
@@ -246,7 +318,8 @@ func (r *Recorder) rotateIfNeeded(now time.Time) error {
 	}
 
 	r.currentFile = f
-	r.currentHour = hour
+	r.currentSlot = slot
+	r.currentFname = filename
 	r.buf = bufio.NewWriter(f)
 	r.enc = json.NewEncoder(r.buf)
 
@@ -262,6 +335,17 @@ func (r *Recorder) flush() {
 	}
 }
 
+func convertPMLevels(levels []state.PMOrderLevel) []PMLevelData {
+	if len(levels) == 0 {
+		return nil
+	}
+	out := make([]PMLevelData, len(levels))
+	for i, l := range levels {
+		out[i] = PMLevelData{Price: l.Price, Size: l.Size}
+	}
+	return out
+}
+
 func (r *Recorder) closeFile() {
 	if r.currentFile != nil {
 		if err := r.currentFile.Close(); err != nil {
@@ -271,4 +355,88 @@ func (r *Recorder) closeFile() {
 		r.enc = nil
 		r.buf = nil
 	}
+}
+
+// archiveLoop runs every 5 minutes, uploading completed (non-current) NDJSON files to S3.
+func (r *Recorder) archiveLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.archiveOnce()
+		}
+	}
+}
+
+func (r *Recorder) archiveOnce() {
+	currentFile := slotFilename(time.Now().UTC())
+
+	pattern := filepath.Join(r.outputDir, "data-*.ndjson")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		r.logger.Error().Err(err).Msg("s3 archive: glob failed")
+		return
+	}
+
+	sort.Strings(matches)
+
+	archived := 0
+	for _, path := range matches {
+		name := filepath.Base(path)
+
+		// Skip the file currently being written.
+		if name == currentFile {
+			continue
+		}
+
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+
+		// Delete empty files.
+		if info.Size() == 0 {
+			os.Remove(path)
+			continue
+		}
+
+		s3Key := r.s3.Prefix + name
+		if err := r.uploadToS3(path, s3Key); err != nil {
+			r.logger.Error().Err(err).Str("file", name).Msg("s3 archive: upload failed")
+			continue
+		}
+
+		if err := os.Remove(path); err != nil {
+			r.logger.Error().Err(err).Str("file", name).Msg("s3 archive: delete after upload failed")
+			continue
+		}
+
+		archived++
+	}
+
+	if archived > 0 {
+		r.logger.Info().Int("archived", archived).Msg("s3 archive: completed")
+	}
+}
+
+func (r *Recorder) uploadToS3(localPath, s3Key string) error {
+	f, err := os.Open(localPath)
+	if err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	_, err = r.s3Client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: &r.s3.Bucket,
+		Key:    &s3Key,
+		Body:   f,
+	})
+	return err
 }

@@ -507,13 +507,23 @@ func selectFiles(dataDir string, from, to time.Time) ([]string, error) {
 		name = strings.TrimPrefix(name, "data-")
 		name = strings.TrimSuffix(name, ".ndjson")
 
-		fileHour, err := time.Parse("2006-01-02-15", name)
+		// Support both hourly (2006-01-02-15) and 15-minute (2006-01-02-15-04) filenames.
+		fileStart, err := time.Parse("2006-01-02-15-04", name)
 		if err != nil {
-			continue
+			fileStart, err = time.Parse("2006-01-02-15", name)
+			if err != nil {
+				continue
+			}
 		}
 
-		fileEnd := fileHour.Add(time.Hour)
-		if fileEnd.After(from) && fileHour.Before(to) {
+		// Determine file duration from name format: 15 min if minute component present, else 1 hour.
+		fileDuration := time.Hour
+		if len(name) > len("2006-01-02-15") {
+			fileDuration = 15 * time.Minute
+		}
+
+		fileEnd := fileStart.Add(fileDuration)
+		if fileEnd.After(from) && fileStart.Before(to) {
 			selected = append(selected, path)
 		}
 	}

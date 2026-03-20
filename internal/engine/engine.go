@@ -92,6 +92,7 @@ func (e *Engine) evaluateMarket(w tracker.ActiveWindowSummary) {
 		Float64("divergence_pct", signals.DivergencePct).
 		Bool("cl_binance_agree", signals.CLBinanceAgree).
 		Float64("liquidity_to_flip", signals.LiquidityToFlip).
+		Float64("book_imbalance", signals.BookImbalance).
 		Float64("expected_move", signals.ExpectedMove).
 		Bool("liquidation_active", signals.LiquidationActive)
 
