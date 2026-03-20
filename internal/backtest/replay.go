@@ -459,12 +459,12 @@ func computeGatePassRates(s *Summary) map[string]float64 {
 	return rates
 }
 
-// classifyWindow returns "5m", "15m", etc. based on the slug format (e.g. "btc-updown-5min-...").
+// classifyWindow returns "5m", "15m", etc. based on the slug format (e.g. "btc-updown-5m-1773945600").
 func classifyWindow(slug string) string {
 	parts := strings.Split(slug, "-")
 	for _, p := range parts {
-		if strings.HasSuffix(p, "min") {
-			return strings.TrimSuffix(p, "in") // "5min" -> "5m"
+		if strings.HasSuffix(p, "m") && len(p) >= 2 && p[0] >= '0' && p[0] <= '9' {
+			return p
 		}
 	}
 	return "unknown"
