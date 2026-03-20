@@ -43,6 +43,10 @@ type Position struct {
 	Side       string
 	EntryPrice float64
 	Size       float64
+	Cost       float64
+	OrderID    string
+	RequestID  string
+	IsLive     bool
 	OpenedAt   time.Time
 }
 
@@ -80,6 +84,7 @@ type CompletedMarket struct {
 type TrackerConfig struct {
 	PreScheduleWindows int
 	CustomFeatures     bool
+	RedeemDelaySecs    int
 }
 
 type ActiveWindowSummary struct {

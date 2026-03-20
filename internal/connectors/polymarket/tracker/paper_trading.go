@@ -71,6 +71,55 @@ func (c *Connector) ExecutePaperTrade(slug, assetID, side, reason string, size f
 	return nil
 }
 
+// SetLivePosition records a real trade position on an active market.
+func (c *Connector) SetLivePosition(slug, assetID, side string, shares, cost float64, orderID, requestID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	market, exists := c.activeMarkets[slug]
+	if !exists {
+		return fmt.Errorf("market not found: %s", slug)
+	}
+
+	outcome := "no"
+	if assetID == market.YesAssetID {
+		outcome = "yes"
+	}
+
+	market.MyPosition = &Position{
+		AssetID:    assetID,
+		Side:       outcome,
+		EntryPrice: cost / shares,
+		Size:       shares,
+		Cost:       cost,
+		OrderID:    orderID,
+		RequestID:  requestID,
+		IsLive:     true,
+		OpenedAt:   time.Now(),
+	}
+
+	c.logEvent(persistence.EventExecution, "live_trade_recorded", map[string]interface{}{
+		"slug":       slug,
+		"asset_id":   assetID,
+		"side":       side,
+		"shares":     shares,
+		"cost":       cost,
+		"order_id":   orderID,
+		"request_id": requestID,
+	})
+
+	c.logger.Info().
+		Str("slug", slug).
+		Str("asset_id", assetID).
+		Str("side", side).
+		Float64("shares", shares).
+		Float64("cost", cost).
+		Str("order_id", orderID).
+		Msg("tracker: recorded live position")
+
+	return nil
+}
+
 func (c *Connector) GetMarketPosition(slug string) *Position {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

@@ -14,6 +14,7 @@ import (
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/chainlink"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/polymarket/gamma"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/polymarket/market"
+	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/execution"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/logging"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/persistence"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/state"
@@ -33,6 +34,9 @@ type Connector struct {
 	state           *state.StateStore
 	persistence     *persistence.Writer
 	logger          *zerolog.Logger
+
+	execClient *execution.Client
+	balance    *execution.BalanceTracker
 
 	activeMarkets   map[string]*ActiveMarket
 	scheduledTimers map[string]*time.Timer
@@ -287,6 +291,12 @@ func (c *Connector) logEvent(eventType persistence.EventType, message string, pa
 		event.WithPayloads(payload)
 	}
 	c.persistence.Write(event)
+}
+
+// SetExecutionClient injects the execution client and balance tracker for live trading.
+func (c *Connector) SetExecutionClient(client *execution.Client, balance *execution.BalanceTracker) {
+	c.execClient = client
+	c.balance = balance
 }
 
 func (c *Connector) GetStats() map[string]interface{} {

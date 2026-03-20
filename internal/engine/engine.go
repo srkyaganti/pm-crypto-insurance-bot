@@ -2,20 +2,25 @@ package engine
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/config"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/polymarket/tracker"
+	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/execution"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/persistence"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/state"
 )
 
-// Engine evaluates active Polymarket markets on a fixed tick and logs paper trades.
+// Engine evaluates active Polymarket markets on a fixed tick and executes trades.
 type Engine struct {
 	state       *state.StateStore
 	tracker     *tracker.Connector
 	cfg         *config.StrategyConfig
+	execClient  *execution.Client
+	balance     *execution.BalanceTracker
 	persistence *persistence.Writer
 	logger      zerolog.Logger
 }
@@ -24,6 +29,8 @@ func NewEngine(
 	store *state.StateStore,
 	trackerConn *tracker.Connector,
 	cfg *config.StrategyConfig,
+	execClient *execution.Client,
+	balance *execution.BalanceTracker,
 	pw *persistence.Writer,
 	baseLogger *zerolog.Logger,
 ) *Engine {
@@ -32,6 +39,8 @@ func NewEngine(
 		state:       store,
 		tracker:     trackerConn,
 		cfg:         cfg,
+		execClient:  execClient,
+		balance:     balance,
 		persistence: pw,
 		logger:      logger,
 	}
@@ -97,8 +106,13 @@ func (e *Engine) evaluateMarket(w tracker.ActiveWindowSummary) {
 		Bool("liquidation_active", signals.LiquidationActive)
 
 	if decision.ShouldTrade {
-		logEvent.Msg("engine: PAPER_TRADE")
-		e.recordPaperTrade(w, decision)
+		if e.cfg.Mode == "live" && e.execClient != nil {
+			logEvent.Msg("engine: LIVE_TRADE")
+			e.executeLiveTrade(w, decision)
+		} else {
+			logEvent.Msg("engine: PAPER_TRADE")
+			e.recordPaperTrade(w, decision)
+		}
 	} else {
 		logEvent.Str("reject_reason", decision.RejectReason).Msg("engine: SKIP")
 	}
@@ -151,6 +165,89 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 		ShouldTrade: true,
 		Side:        sig.WinningSide,
 		Signals:     sig,
+	}
+}
+
+func (e *Engine) executeLiveTrade(w tracker.ActiveWindowSummary, decision TradeDecision) {
+	sig := decision.Signals
+	tradeSize := e.cfg.TradeSizeUSD
+
+	if !e.balance.Debit(tradeSize) {
+		e.logger.Warn().
+			Str("slug", w.Slug).
+			Float64("trade_size", tradeSize).
+			Msg("engine: insufficient balance for live trade")
+		return
+	}
+
+	requestID := fmt.Sprintf("trade-%s-%d", w.Slug, time.Now().UnixMilli())
+
+	assetID := w.NoAssetID
+	if decision.Side == "YES" {
+		assetID = w.YesAssetID
+	}
+
+	priceCeiling := e.symbolFloat(e.cfg.MinPMConfidence, sig.Symbol)
+
+	orderReq := execution.MarketOrderRequest{
+		TokenID:   assetID,
+		Side:      "BUY",
+		Amount:    tradeSize,
+		TickSize:  "0.01",
+		NegRisk:   false,
+		OrderType: "FOK",
+		Price:     priceCeiling,
+	}
+
+	resp, err := e.execClient.PlaceMarketOrder(context.Background(), requestID, orderReq)
+	if err != nil {
+		e.balance.Credit(tradeSize)
+		e.logger.Error().Err(err).Str("slug", w.Slug).Str("request_id", requestID).Msg("engine: live order request failed")
+		return
+	}
+
+	if !resp.Success {
+		e.balance.Credit(tradeSize)
+		e.logger.Warn().
+			Str("slug", w.Slug).
+			Str("request_id", requestID).
+			Str("error", resp.ErrorMsg).
+			Msg("engine: live order rejected")
+		return
+	}
+
+	shares, _ := strconv.ParseFloat(resp.TakingAmount, 64)
+	cost, _ := strconv.ParseFloat(resp.MakingAmount, 64)
+
+	if err := e.tracker.SetLivePosition(w.Slug, assetID, decision.Side, shares, cost, resp.OrderID, requestID); err != nil {
+		e.logger.Error().Err(err).Str("slug", w.Slug).Msg("engine: failed to record live position")
+	}
+
+	e.logger.Info().
+		Str("slug", w.Slug).
+		Str("request_id", requestID).
+		Str("order_id", resp.OrderID).
+		Str("side", decision.Side).
+		Float64("shares", shares).
+		Float64("cost", cost).
+		Float64("price_ceiling", priceCeiling).
+		Msg("engine: live trade filled")
+
+	if e.persistence != nil {
+		event := persistence.NewEvent("engine", persistence.EventExecution, "live_trade")
+		event.WithPayloads(map[string]interface{}{
+			"slug":          w.Slug,
+			"symbol":        sig.Symbol,
+			"side":          decision.Side,
+			"asset_id":      assetID,
+			"request_id":    requestID,
+			"order_id":      resp.OrderID,
+			"shares":        shares,
+			"cost":          cost,
+			"price_ceiling": priceCeiling,
+			"trade_size":    tradeSize,
+		})
+		e.persistence.Write(event)
 	}
 }
 

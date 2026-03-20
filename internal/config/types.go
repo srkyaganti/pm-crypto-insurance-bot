@@ -9,6 +9,7 @@ type Config struct {
 	BinancePerps BinancePerpsConfig `yaml:"binance_perps"`
 	Polymarket   PolymarketConfig   `yaml:"polymarket"`
 	Strategy     StrategyConfig     `yaml:"strategy"`
+	Execution    ExecutionConfig    `yaml:"execution"`
 	Risk         RiskConfig         `yaml:"risk"`
 	Persistence  PersistenceConfig  `yaml:"persistence"`
 	Sampler      SamplerConfig      `yaml:"sampler"`
@@ -18,6 +19,7 @@ type Config struct {
 
 type StrategyConfig struct {
 	Enabled                   bool               `yaml:"enabled" json:"enabled"`
+	Mode                      string             `yaml:"mode" json:"mode"`
 	EntryWindowMinSecs        int                `yaml:"entry_window_min_secs" json:"entry_window_min_secs"`
 	EntryWindowMaxSecs        int                `yaml:"entry_window_max_secs" json:"entry_window_max_secs"`
 	MinPMConfidence           map[string]float64 `yaml:"min_pm_confidence" json:"min_pm_confidence"`
@@ -26,6 +28,7 @@ type StrategyConfig struct {
 	MinDepth                  map[string]float64 `yaml:"min_depth" json:"min_depth"`
 	MaxSharesPerTrade         int                `yaml:"max_shares_per_trade" json:"max_shares_per_trade"`
 	MaxConcurrentPositions    int                `yaml:"max_concurrent_positions" json:"max_concurrent_positions"`
+	TradeSizeUSD              float64            `yaml:"trade_size_usd" json:"trade_size_usd"`
 }
 
 type PolymarketMarketConfig struct {
@@ -112,6 +115,14 @@ type HTTPServerConfig struct {
 	ListenAddr     string `yaml:"listen_addr"`
 	ReadTimeoutMs  int    `yaml:"read_timeout_ms"`
 	WriteTimeoutMs int    `yaml:"write_timeout_ms"`
+}
+
+type ExecutionConfig struct {
+	URL                    string `yaml:"url"`
+	TimeoutMs              int    `yaml:"timeout_ms"`
+	RedeemDelaySecs        int    `yaml:"redeem_delay_secs"`
+	RedeemPollIntervalSecs int    `yaml:"redeem_poll_interval_secs"`
+	RedeemTimeoutSecs      int    `yaml:"redeem_timeout_secs"`
 }
 
 type RiskConfig struct {

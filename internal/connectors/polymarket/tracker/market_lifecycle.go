@@ -277,6 +277,49 @@ func (c *Connector) handleMarketEnd(slug string) {
 		Timestamp:      time.Now(),
 	}
 
+	// Live trading: redeem winning positions or reconcile on loss
+	if activeMarket.MyPosition != nil && activeMarket.MyPosition.IsLive && c.execClient != nil {
+		if activeMarket.MyPosition.Side == winningOutcome {
+			delaySecs := c.config.RedeemDelaySecs
+			if delaySecs <= 0 {
+				delaySecs = 60
+			}
+			c.logger.Info().
+				Str("slug", slug).
+				Int("delay_secs", delaySecs).
+				Msg("tracker: waiting for on-chain resolution before redeem")
+			time.Sleep(time.Duration(delaySecs) * time.Second)
+
+			requestID := fmt.Sprintf("redeem-%s-%d", slug, time.Now().UnixMilli())
+			if err := c.execClient.RedeemAndWait(c.ctx, requestID, activeMarket.ConditionID); err != nil {
+				c.logger.Error().Err(err).Str("slug", slug).Msg("tracker: redeem failed")
+			} else {
+				payout := activeMarket.MyPosition.Size // shares x $1
+				c.balance.Credit(payout)
+				c.logger.Info().
+					Str("slug", slug).
+					Float64("payout", payout).
+					Msg("tracker: redeemed successfully")
+			}
+
+			go func() {
+				actual, err := c.execClient.GetCollateralBalance(c.ctx)
+				if err != nil {
+					c.logger.Error().Err(err).Msg("tracker: balance reconciliation failed")
+					return
+				}
+				c.balance.Reconcile(actual)
+			}()
+		} else {
+			go func() {
+				actual, err := c.execClient.GetCollateralBalance(c.ctx)
+				if err == nil {
+					c.balance.Reconcile(actual)
+				}
+			}()
+		}
+	}
+
 	c.mu.Lock()
 	c.marketHistory = append(c.marketHistory, completedMarket)
 	c.mu.Unlock()

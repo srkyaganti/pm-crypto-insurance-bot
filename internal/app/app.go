@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/config"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/engine"
+	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/execution"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/recorder"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/httpserver"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors"
@@ -82,8 +84,45 @@ func New(cfgPath string) (*App, error) {
 	}
 
 	if cfg.Strategy.Enabled && app.trackerConn != nil {
+		var execClient *execution.Client
+		var balanceTracker *execution.BalanceTracker
+
+		if cfg.Strategy.Mode == "live" {
+			execCfg := execution.Config{
+				URL:                cfg.Execution.URL,
+				Timeout:            time.Duration(cfg.Execution.TimeoutMs) * time.Millisecond,
+				RedeemDelay:        time.Duration(cfg.Execution.RedeemDelaySecs) * time.Second,
+				RedeemPollInterval: time.Duration(cfg.Execution.RedeemPollIntervalSecs) * time.Second,
+				RedeemTimeout:      time.Duration(cfg.Execution.RedeemTimeoutSecs) * time.Second,
+			}
+			execLogger := logging.Component(logger, "execution")
+			execClient = execution.NewClient(execCfg, execLogger)
+
+			if err := execClient.HealthCheck(context.Background()); err != nil {
+				return nil, fmt.Errorf("execution engine health check failed: %w", err)
+			}
+
+			balanceTracker = execution.NewBalanceTracker(execLogger)
+			balance, err := execClient.GetCollateralBalance(context.Background())
+			if err != nil {
+				return nil, fmt.Errorf("failed to get initial balance: %w", err)
+			}
+			balanceTracker.Seed(balance)
+
+			app.trackerConn.SetExecutionClient(execClient, balanceTracker)
+
+			appLogger.Info().
+				Float64("initial_balance", balance).
+				Str("execution_url", cfg.Execution.URL).
+				Msg("live trading enabled")
+		}
+
 		engineLogger := logging.Component(logger, "engine")
-		app.decisionEngine = engine.NewEngine(app.state, app.trackerConn, &cfg.Strategy, app.persistence, engineLogger)
+		app.decisionEngine = engine.NewEngine(
+			app.state, app.trackerConn, &cfg.Strategy,
+			execClient, balanceTracker,
+			app.persistence, engineLogger,
+		)
 	}
 
 	if cfg.Recorder.Enabled && app.trackerConn != nil {

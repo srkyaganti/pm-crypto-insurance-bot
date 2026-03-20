@@ -63,6 +63,7 @@ polymarket:
 
 strategy:
   enabled: false
+  mode: "paper"
   entry_window_min_secs: 60
   entry_window_max_secs: 120
   min_pm_confidence:
@@ -83,6 +84,14 @@ strategy:
     SOL: 50.0
   max_shares_per_trade: 200
   max_concurrent_positions: 5
+  trade_size_usd: 1.0
+
+execution:
+  url: "http://localhost:3000"
+  timeout_ms: 5000
+  redeem_delay_secs: 60
+  redeem_poll_interval_secs: 5
+  redeem_timeout_secs: 120
 
 risk:
   kill_switch: false
