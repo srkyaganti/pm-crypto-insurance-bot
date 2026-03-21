@@ -275,7 +275,7 @@ func sweepFile(path string, from, to time.Time, states []configState, globalSnap
 			clState := convertChainlink(symData.Chainlink)
 			spotState := convertSpot(symData.BinanceSpot)
 			perpsState := convertPerps(symData.BinancePerps)
-			signals := engine.ComputeSignals(w, clState, spotState, perpsState)
+			signals := engine.ComputeSignals(w, clState, spotState, perpsState, 0, snapTime)
 
 			// Per-config evaluation.
 			for ci := range states {

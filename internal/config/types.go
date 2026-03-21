@@ -27,6 +27,12 @@ type StrategyConfig struct {
 	DepthSafetyMultiplier     map[string]float64 `yaml:"depth_safety_multiplier" json:"depth_safety_multiplier"`
 	MinGapPct                 map[string]float64 `yaml:"min_gap_pct" json:"min_gap_pct"`
 	MinDepth                  map[string]float64 `yaml:"min_depth" json:"min_depth"`
+	MaxEntryPrice             map[string]float64 `yaml:"max_entry_price" json:"max_entry_price"`
+	SustainedConfWindowSecs   int                `yaml:"sustained_conf_window_secs" json:"sustained_conf_window_secs"`
+	MinGapTrend               map[string]float64 `yaml:"min_gap_trend" json:"min_gap_trend"`
+	GapTrendLookbackS         int                `yaml:"gap_trend_lookback_s" json:"gap_trend_lookback_s"`
+	MaxFlowDisagreement       map[string]float64 `yaml:"max_flow_disagreement" json:"max_flow_disagreement"`
+	MinDepthRatio             map[string]float64 `yaml:"min_depth_ratio" json:"min_depth_ratio"`
 	MaxSharesPerTrade         int                `yaml:"max_shares_per_trade" json:"max_shares_per_trade"`
 	MaxConcurrentPositions    int                `yaml:"max_concurrent_positions" json:"max_concurrent_positions"`
 	TradeSizeUSD              float64            `yaml:"trade_size_usd" json:"trade_size_usd"`

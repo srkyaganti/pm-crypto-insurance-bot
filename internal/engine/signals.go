@@ -2,6 +2,7 @@ package engine
 
 import (
 	"math"
+	"time"
 
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/connectors/polymarket/tracker"
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/state"
@@ -13,6 +14,8 @@ func ComputeSignals(
 	clState state.ChainlinkState,
 	spotState state.BinanceSpotState,
 	perpsState state.BinancePerpsState,
+	gapTrendLookbackS int,
+	now time.Time,
 ) MarketSignals {
 	clPrice := clState.LatestPrice
 	startPrice := w.StartPrice
@@ -43,6 +46,36 @@ func ComputeSignals(
 	bookImbalance := spotState.BookImbalanceNearPrice(startPrice, 0.1)
 	expectedMove := EstimateExpectedMove(clState.Ticks, w.TimeRemainingS, clPrice)
 
+	// Gap trend: compare current gap to gap N seconds ago
+	var gapTrend float64
+	lookback := gapTrendLookbackS
+	if lookback <= 0 {
+		lookback = 10
+	}
+	pastTicks := clState.Ticks.GetTicksSince(now.Add(-time.Duration(lookback) * time.Second))
+	if len(pastTicks) > 0 && startPrice > 0 {
+		gapPrev := pastTicks[0].Price - startPrice
+		if gapPrev != 0 && ((gap > 0 && gapPrev > 0) || (gap < 0 && gapPrev < 0)) {
+			gapTrend = gap / gapPrev
+		}
+	}
+
+	// Flow signals
+	flowMomentum := spotState.FlowMomentum()
+	flowIntensity30s := spotState.FlowIntensity30s()
+	volumePerSec := 0.0
+	if flowIntensity30s > 0 {
+		volumePerSec = flowIntensity30s / 30.0
+	}
+
+	// Dynamic depth signals
+	liquidityToFlipUSD := liquidityToFlip * clPrice
+	expectedVolumeRemaining := volumePerSec * float64(w.TimeRemainingS)
+	depthRatio := 0.0
+	if expectedVolumeRemaining > 0 {
+		depthRatio = liquidityToFlipUSD / expectedVolumeRemaining
+	}
+
 	return MarketSignals{
 		Slug:              w.Slug,
 		Symbol:            w.Symbol,
@@ -57,6 +90,13 @@ func ComputeSignals(
 		LiquidityToFlip:   liquidityToFlip,
 		BookImbalance:     bookImbalance,
 		ExpectedMove:      expectedMove,
+		GapTrend:          gapTrend,
+		FlowMomentum:      flowMomentum,
+		FlowIntensity30s:        flowIntensity30s,
+		VolumePerSec:            volumePerSec,
+		LiquidityToFlipUSD:      liquidityToFlipUSD,
+		ExpectedVolumeRemaining: expectedVolumeRemaining,
+		DepthRatio:              depthRatio,
 		LiquidationActive: perpsState.LiquidationFlag,
 		TimeRemainingS:    w.TimeRemainingS,
 	}

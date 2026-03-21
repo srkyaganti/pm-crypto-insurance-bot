@@ -24,7 +24,8 @@ type Engine struct {
 	persistence *persistence.Writer
 	logger      zerolog.Logger
 
-	pendingOrders map[string]bool // slug → order in flight (single-threaded, no mutex needed)
+	pendingOrders map[string]bool      // slug → order in flight (single-threaded, no mutex needed)
+	confHistory   map[string][]confEntry // slug → recent PM confidence observations
 }
 
 func NewEngine(
@@ -46,6 +47,7 @@ func NewEngine(
 		persistence:   pw,
 		logger:        logger,
 		pendingOrders: make(map[string]bool),
+		confHistory:   make(map[string][]confEntry),
 	}
 }
 
@@ -55,6 +57,31 @@ func (e *Engine) symbolFloat(m map[string]float64, symbol string) float64 {
 		return v
 	}
 	return 0
+}
+
+// recordAndGetSustainedConf tracks PM confidence over a rolling window and returns the minimum.
+func (e *Engine) recordAndGetSustainedConf(slug string, conf float64, now time.Time) float64 {
+	windowSecs := e.cfg.SustainedConfWindowSecs
+	if windowSecs <= 0 {
+		return conf
+	}
+	e.confHistory[slug] = append(e.confHistory[slug], confEntry{Timestamp: now, Conf: conf})
+
+	cutoff := now.Add(-time.Duration(windowSecs) * time.Second)
+	entries := e.confHistory[slug]
+	start := 0
+	for start < len(entries) && entries[start].Timestamp.Before(cutoff) {
+		start++
+	}
+	e.confHistory[slug] = entries[start:]
+
+	minConf := conf
+	for _, ent := range e.confHistory[slug] {
+		if ent.Conf < minConf {
+			minConf = ent.Conf
+		}
+	}
+	return minConf
 }
 
 // Run starts the 500ms evaluation loop and blocks until ctx is cancelled.
@@ -79,8 +106,16 @@ func (e *Engine) tick() {
 	if e.tracker == nil {
 		return
 	}
+	activeSlugs := make(map[string]bool)
 	for _, w := range e.tracker.GetActiveWindowSummaries() {
+		activeSlugs[w.Slug] = true
 		e.evaluateMarket(w)
+	}
+	// Prune confHistory for inactive slugs
+	for slug := range e.confHistory {
+		if !activeSlugs[slug] {
+			delete(e.confHistory, slug)
+		}
 	}
 }
 
@@ -89,7 +124,9 @@ func (e *Engine) evaluateMarket(w tracker.ActiveWindowSummary) {
 	spotState := e.state.GetBinanceSpot(w.Symbol)
 	perpsState := e.state.GetBinancePerps(w.Symbol)
 
-	signals := ComputeSignals(w, clState, spotState, perpsState)
+	now := time.Now()
+	signals := ComputeSignals(w, clState, spotState, perpsState, e.cfg.GapTrendLookbackS, now)
+	signals.SustainedPMConf = e.recordAndGetSustainedConf(w.Slug, signals.PMConfidence, now)
 	decision := e.runGates(w, signals)
 
 	logEvent := e.logger.Info().
@@ -106,6 +143,11 @@ func (e *Engine) evaluateMarket(w tracker.ActiveWindowSummary) {
 		Float64("liquidity_to_flip", signals.LiquidityToFlip).
 		Float64("book_imbalance", signals.BookImbalance).
 		Float64("expected_move", signals.ExpectedMove).
+		Float64("sustained_pm_conf", signals.SustainedPMConf).
+		Float64("gap_trend", signals.GapTrend).
+		Float64("flow_momentum", signals.FlowMomentum).
+		Float64("depth_ratio", signals.DepthRatio).
+		Float64("volume_per_sec", signals.VolumePerSec).
 		Bool("liquidation_active", signals.LiquidationActive)
 
 	if decision.ShouldTrade {
@@ -138,14 +180,35 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 		return TradeDecision{RejectReason: "gate2_order_in_flight", Signals: sig}
 	}
 
-	// Gate 3: Polymarket is already pricing the winning side at high confidence
-	if sig.PMConfidence < e.symbolFloat(e.cfg.MinPMConfidence, sig.Symbol) {
+	// Gate 3: Polymarket is already pricing the winning side at high confidence (sustained)
+	confToCheck := sig.SustainedPMConf
+	if confToCheck == 0 {
+		confToCheck = sig.PMConfidence
+	}
+	if confToCheck < e.symbolFloat(e.cfg.MinPMConfidence, sig.Symbol) {
 		return TradeDecision{RejectReason: "gate3_pm_confidence", Signals: sig}
 	}
 
 	// Gate 4: CL and Binance agree on which side of start_price, and divergence is small
 	if !sig.CLBinanceAgree || sig.DivergencePct > e.symbolFloat(e.cfg.MaxCLBinanceDivergencePct, sig.Symbol) {
 		return TradeDecision{RejectReason: "gate4_cl_binance_agreement", Signals: sig}
+	}
+
+	// Gate 4b: Gap trend — reject if gap is fading
+	if minTrend := e.symbolFloat(e.cfg.MinGapTrend, sig.Symbol); minTrend > 0 && sig.GapTrend > 0 {
+		if sig.GapTrend < minTrend {
+			return TradeDecision{RejectReason: "gate4b_gap_fading", Signals: sig}
+		}
+	}
+
+	// Gate 4c: Flow agreement — reject if trade flow strongly disagrees with bet
+	if maxDisagree := e.symbolFloat(e.cfg.MaxFlowDisagreement, sig.Symbol); maxDisagree > 0 {
+		if sig.WinningSide == "YES" && sig.FlowMomentum < -maxDisagree {
+			return TradeDecision{RejectReason: "gate4c_flow_disagrees", Signals: sig}
+		}
+		if sig.WinningSide == "NO" && sig.FlowMomentum > maxDisagree {
+			return TradeDecision{RejectReason: "gate4c_flow_disagrees", Signals: sig}
+		}
 	}
 
 	// Gate 5a: Minimum absolute gap as % of start price — reject noise/flat markets
@@ -168,8 +231,13 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 	if gapAbs < e.symbolFloat(e.cfg.DepthSafetyMultiplier, sig.Symbol)*sig.ExpectedMove {
 		return TradeDecision{RejectReason: "gate5_gap_too_small", Signals: sig}
 	}
-	if sig.LiquidityToFlip < e.symbolFloat(e.cfg.MinDepth, sig.Symbol) {
-		return TradeDecision{RejectReason: "gate5_depth_too_thin", Signals: sig}
+	// Gate 5 (depth): dynamic ratio if volume data available, else static floor
+	if minRatio := e.symbolFloat(e.cfg.MinDepthRatio, sig.Symbol); minRatio > 0 && sig.DepthRatio > 0 {
+		if sig.DepthRatio < minRatio {
+			return TradeDecision{RejectReason: "gate5_depth_ratio_too_low", Signals: sig}
+		}
+	} else if sig.LiquidityToFlip < e.symbolFloat(e.cfg.MinDepth, sig.Symbol) {
+		return TradeDecision{RejectReason: "gate5_depth_floor", Signals: sig}
 	}
 
 	// Gate 6: No active liquidation cascade on perps
@@ -207,6 +275,9 @@ func (e *Engine) executeLiveTrade(w tracker.ActiveWindowSummary, decision TradeD
 	}
 
 	priceCeiling := sig.PMConfidence // use actual ask price from the PM book
+	if maxEntry := e.symbolFloat(e.cfg.MaxEntryPrice, sig.Symbol); maxEntry > 0 && maxEntry < priceCeiling {
+		priceCeiling = maxEntry
+	}
 
 	orderReq := execution.MarketOrderRequest{
 		TokenID:   assetID,
