@@ -12,15 +12,15 @@ type Rotator struct {
 	basePath      string
 	currentFile   *os.File
 	currentPath   string
-	currentHour   int
+	currentSlot   int64
 	mu            sync.Mutex
-	lastRotation  time.Time
 	rotationCount int64
 }
 
 func NewRotator(basePath string) *Rotator {
 	return &Rotator{
-		basePath: basePath,
+		basePath:    basePath,
+		currentSlot: -1,
 	}
 }
 
@@ -32,24 +32,16 @@ func (r *Rotator) Initialize() error {
 		return fmt.Errorf("failed to create log directory: %w", err)
 	}
 
-	return r.rotateFile()
+	return r.rotateUnlocked(time.Now().UTC())
 }
 
 func (r *Rotator) GetCurrentFile() (*os.File, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	currentHour := time.Now().UTC().Hour()
-
-	if r.currentFile == nil || currentHour != r.currentHour {
-		if err := r.rotateFileUnlocked(); err != nil {
-			return nil, err
-		}
-		r.currentHour = currentHour
-	}
-
-	if r.lastRotation.IsZero() || time.Since(r.lastRotation) >= time.Hour {
-		if err := r.rotateFileUnlocked(); err != nil {
+	slot := slotID(time.Now().UTC())
+	if r.currentFile == nil || slot != r.currentSlot {
+		if err := r.rotateUnlocked(time.Now().UTC()); err != nil {
 			return nil, err
 		}
 	}
@@ -57,12 +49,17 @@ func (r *Rotator) GetCurrentFile() (*os.File, error) {
 	return r.currentFile, nil
 }
 
-func (r *Rotator) rotateFile() error {
-	return r.rotateFileUnlocked()
+func slotID(t time.Time) int64 {
+	return t.Unix() / (15 * 60)
 }
 
-func (r *Rotator) rotateFileUnlocked() error {
-	now := time.Now().UTC()
+func (r *Rotator) generateFilePath(t time.Time) string {
+	slotStart := t.Truncate(15 * time.Minute)
+	filename := fmt.Sprintf("events-%s.ndjson", slotStart.Format("2006-01-02-15-04"))
+	return filepath.Join(r.basePath, filename)
+}
+
+func (r *Rotator) rotateUnlocked(now time.Time) error {
 	newPath := r.generateFilePath(now)
 
 	if r.currentPath == newPath && r.currentFile != nil {
@@ -83,16 +80,10 @@ func (r *Rotator) rotateFileUnlocked() error {
 
 	r.currentFile = file
 	r.currentPath = newPath
-	r.lastRotation = now
+	r.currentSlot = slotID(now)
 	r.rotationCount++
-	r.currentHour = now.Hour()
 
 	return nil
-}
-
-func (r *Rotator) generateFilePath(t time.Time) string {
-	filename := fmt.Sprintf("engine-%s.ndjson", t.Format("2006-01-02-15"))
-	return filepath.Join(r.basePath, filename)
 }
 
 func (r *Rotator) Sync() error {
@@ -137,5 +128,5 @@ func (r *Rotator) RotationCount() int64 {
 func (r *Rotator) ForceRotate() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.rotateFileUnlocked()
+	return r.rotateUnlocked(time.Now().UTC())
 }

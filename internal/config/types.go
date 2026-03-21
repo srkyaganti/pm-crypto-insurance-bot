@@ -55,6 +55,10 @@ type LoggingConfig struct {
 	MaxBackups int    `yaml:"max_backups"`
 	MaxAgeDays int    `yaml:"max_age_days"`
 	Compress   bool   `yaml:"compress"`
+	S3Enabled  bool   `yaml:"s3_enabled"`
+	S3Bucket   string `yaml:"s3_bucket"`
+	S3Region   string `yaml:"s3_region"`
+	S3Prefix   string `yaml:"s3_prefix"`
 }
 
 type ChainlinkConfig struct {

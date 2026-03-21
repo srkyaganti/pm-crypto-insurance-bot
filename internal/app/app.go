@@ -32,6 +32,7 @@ type App struct {
 	supervisor  *lifecycle.Supervisor
 	state       *state.StateStore
 	persistence *persistence.Writer
+	logWriter   *logging.RotatingWriter
 	connectors  []connectors.Connector
 	trackerConn   *tracker.Connector
 	chainlinkConn *chainlink.Connector
@@ -46,7 +47,7 @@ func New(cfgPath string) (*App, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
-	logger, err := logging.New(&cfg.Logging)
+	logger, logWriter, err := logging.New(&cfg.Logging)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize logger: %w", err)
 	}
@@ -62,6 +63,7 @@ func New(cfgPath string) (*App, error) {
 		logger:     appLogger,
 		supervisor: supervisor,
 		state:      store,
+		logWriter:  logWriter,
 		connectors: make([]connectors.Connector, 0),
 		running:    false,
 	}
@@ -71,6 +73,12 @@ func New(cfgPath string) (*App, error) {
 		pw, err := persistence.NewWriter(
 			cfg.Persistence.NdjsonPath,
 			cfg.Persistence.FlushIntervalMs,
+			persistence.S3Config{
+				Enabled: cfg.Persistence.S3Enabled,
+				Bucket:  cfg.Persistence.S3Bucket,
+				Region:  cfg.Persistence.S3Region,
+				Prefix:  cfg.Persistence.S3Prefix,
+			},
 			persistLogger,
 		)
 		if err != nil {
@@ -325,6 +333,13 @@ func (a *App) Run() error {
 		m.IsHealthy = true
 	})
 
+	if a.logWriter != nil {
+		if err := a.logWriter.Start(a.supervisor.Context()); err != nil {
+			a.logger.Error().Err(err).Msg("failed to start log writer S3 archival")
+			return err
+		}
+	}
+
 	if a.persistence != nil {
 		if err := a.persistence.Start(a.supervisor.Context(), a.supervisor.WaitGroup()); err != nil {
 			a.logger.Error().Err(err).Msg("failed to start persistence writer")
@@ -478,6 +493,10 @@ func (a *App) Shutdown() {
 	if a.persistence != nil {
 		a.logger.Info().Msg("stopping persistence writer")
 		a.persistence.Stop()
+	}
+
+	if a.logWriter != nil {
+		a.logWriter.Stop()
 	}
 
 	a.supervisor.Shutdown()

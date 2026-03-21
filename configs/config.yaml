@@ -9,6 +9,10 @@ logging:
   max_backups: 10
   max_age_days: 30
   compress: true
+  s3_enabled: true
+  s3_bucket: "${RECORDER_S3_BUCKET}"
+  s3_region: "${RECORDER_S3_REGION}"
+  s3_prefix: "logs/engine/"
 
 markets:
   - symbol: "BTC"
@@ -62,8 +66,8 @@ polymarket:
     custom_features: true
 
 strategy:
-  enabled: false
-  mode: "paper"
+  enabled: true
+  mode: "live"
   entry_window_min_secs: 10
   entry_window_max_secs: 120
   min_pm_confidence:
@@ -109,10 +113,10 @@ persistence:
   ndjson_path: "./logs/events"
   rotation_interval: 3600
   flush_interval_ms: 1000
-  s3_enabled: false
-  s3_bucket: ""
-  s3_region: "us-east-1"
-  s3_prefix: "pm-insurance-bot/"
+  s3_enabled: true
+  s3_bucket: "${RECORDER_S3_BUCKET}"
+  s3_region: "${RECORDER_S3_REGION}"
+  s3_prefix: "logs/events/"
 
 sampler:
   enabled: true
@@ -123,7 +127,7 @@ recorder:
   enabled: true
   output_dir: "./logs/recorder"
   interval_secs: 1
-  s3_enabled: false
+  s3_enabled: true
   s3_bucket: "${RECORDER_S3_BUCKET}"
   s3_region: "${RECORDER_S3_REGION}"
   s3_prefix: "logs/recorder/"

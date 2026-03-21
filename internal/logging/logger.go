@@ -9,9 +9,12 @@ import (
 	"github.com/srkyaganti/pm-crypto-insurance-bot/internal/config"
 )
 
-func New(cfg *config.LoggingConfig) (*zerolog.Logger, error) {
-	if err := ensureLogDir(cfg.FilePath); err != nil {
-		return nil, err
+func New(cfg *config.LoggingConfig) (*zerolog.Logger, *RotatingWriter, error) {
+	dir := filepath.Dir(cfg.FilePath)
+	if dir != "" {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	var writers []io.Writer
@@ -23,12 +26,18 @@ func New(cfg *config.LoggingConfig) (*zerolog.Logger, error) {
 	}
 	writers = append(writers, consoleWriter)
 
+	var rw *RotatingWriter
 	if cfg.FilePath != "" {
-		file, err := os.OpenFile(cfg.FilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			return nil, err
+		rw = NewRotatingWriter(dir, S3Config{
+			Enabled: cfg.S3Enabled,
+			Bucket:  cfg.S3Bucket,
+			Region:  cfg.S3Region,
+			Prefix:  cfg.S3Prefix,
+		})
+		if err := rw.Initialize(); err != nil {
+			return nil, nil, err
 		}
-		writers = append(writers, file)
+		writers = append(writers, rw)
 	}
 
 	multiWriter := io.MultiWriter(writers...)
@@ -44,15 +53,7 @@ func New(cfg *config.LoggingConfig) (*zerolog.Logger, error) {
 		Logger().
 		Level(level)
 
-	return &logger, nil
-}
-
-func ensureLogDir(filePath string) error {
-	if filePath == "" {
-		return nil
-	}
-	dir := filepath.Dir(filePath)
-	return os.MkdirAll(dir, 0755)
+	return &logger, rw, nil
 }
 
 func parseLevel(level string) (zerolog.Level, error) {
