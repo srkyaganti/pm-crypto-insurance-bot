@@ -148,14 +148,22 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 		return TradeDecision{RejectReason: "gate4_cl_binance_agreement", Signals: sig}
 	}
 
+	// Gate 5a: Minimum absolute gap as % of start price — reject noise/flat markets
+	gapAbs := sig.Gap
+	if gapAbs < 0 {
+		gapAbs = -gapAbs
+	}
+	if minGapPct := e.symbolFloat(e.cfg.MinGapPct, sig.Symbol); minGapPct > 0 && sig.StartPrice > 0 {
+		gapPct := (gapAbs / sig.StartPrice) * 100
+		if gapPct < minGapPct {
+			return TradeDecision{RejectReason: "gate5a_gap_below_min_pct", Signals: sig}
+		}
+	}
+
 	// Gate 5: Price gap must exceed expected move, and order book must have minimum depth.
 	// Block if ring buffer hasn't filled yet (no reliable stddev estimate).
 	if sig.ExpectedMove == 0 {
 		return TradeDecision{RejectReason: "gate5_expected_move_unavailable", Signals: sig}
-	}
-	gapAbs := sig.Gap
-	if gapAbs < 0 {
-		gapAbs = -gapAbs
 	}
 	if gapAbs < e.symbolFloat(e.cfg.DepthSafetyMultiplier, sig.Symbol)*sig.ExpectedMove {
 		return TradeDecision{RejectReason: "gate5_gap_too_small", Signals: sig}

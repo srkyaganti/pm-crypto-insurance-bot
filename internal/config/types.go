@@ -25,6 +25,7 @@ type StrategyConfig struct {
 	MinPMConfidence           map[string]float64 `yaml:"min_pm_confidence" json:"min_pm_confidence"`
 	MaxCLBinanceDivergencePct map[string]float64 `yaml:"max_cl_binance_divergence_pct" json:"max_cl_binance_divergence_pct"`
 	DepthSafetyMultiplier     map[string]float64 `yaml:"depth_safety_multiplier" json:"depth_safety_multiplier"`
+	MinGapPct                 map[string]float64 `yaml:"min_gap_pct" json:"min_gap_pct"`
 	MinDepth                  map[string]float64 `yaml:"min_depth" json:"min_depth"`
 	MaxSharesPerTrade         int                `yaml:"max_shares_per_trade" json:"max_shares_per_trade"`
 	MaxConcurrentPositions    int                `yaml:"max_concurrent_positions" json:"max_concurrent_positions"`

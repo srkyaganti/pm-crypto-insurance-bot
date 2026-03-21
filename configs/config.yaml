@@ -68,8 +68,8 @@ polymarket:
 strategy:
   enabled: true
   mode: "live"
-  entry_window_min_secs: 10
-  entry_window_max_secs: 120
+  entry_window_min_secs: 30
+  entry_window_max_secs: 90
   min_pm_confidence:
     BTC: 0.95
     ETH: 0.95
@@ -79,9 +79,13 @@ strategy:
     ETH: 0.05
     SOL: 0.05
   depth_safety_multiplier:
-    BTC: 2.0
-    ETH: 2.0
-    SOL: 2.0
+    BTC: 3.0
+    ETH: 3.0
+    SOL: 3.0
+  min_gap_pct:
+    BTC: 0.02
+    ETH: 0.02
+    SOL: 0.02
   min_depth:
     BTC: 0.5
     ETH: 50.0
