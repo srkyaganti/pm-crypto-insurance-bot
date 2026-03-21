@@ -64,7 +64,7 @@ polymarket:
 strategy:
   enabled: false
   mode: "paper"
-  entry_window_min_secs: 60
+  entry_window_min_secs: 10
   entry_window_max_secs: 120
   min_pm_confidence:
     BTC: 0.95
@@ -75,11 +75,11 @@ strategy:
     ETH: 0.05
     SOL: 0.05
   depth_safety_multiplier:
-    BTC: 2.5
-    ETH: 2.5
-    SOL: 2.5
+    BTC: 2.0
+    ETH: 2.0
+    SOL: 2.0
   min_depth:
-    BTC: 0.1
+    BTC: 0.5
     ETH: 50.0
     SOL: 50.0
   max_shares_per_trade: 200
