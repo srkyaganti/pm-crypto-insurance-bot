@@ -123,6 +123,10 @@ func New(cfgPath string) (*App, error) {
 				Float64("initial_balance", balance).
 				Str("execution_url", cfg.Execution.URL).
 				Msg("live trading enabled")
+
+			if err := app.trackerConn.RecoverPositions(context.Background()); err != nil {
+				appLogger.Error().Err(err).Msg("failed to recover positions, continuing")
+			}
 		}
 
 		engineLogger := logging.Component(logger, "engine")

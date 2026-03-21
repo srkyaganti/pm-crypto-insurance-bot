@@ -23,6 +23,8 @@ type Engine struct {
 	balance     *execution.BalanceTracker
 	persistence *persistence.Writer
 	logger      zerolog.Logger
+
+	pendingOrders map[string]bool // slug → order in flight (single-threaded, no mutex needed)
 }
 
 func NewEngine(
@@ -36,13 +38,14 @@ func NewEngine(
 ) *Engine {
 	logger := baseLogger.With().Str("component", "engine").Logger()
 	return &Engine{
-		state:       store,
-		tracker:     trackerConn,
-		cfg:         cfg,
-		execClient:  execClient,
-		balance:     balance,
-		persistence: pw,
-		logger:      logger,
+		state:         store,
+		tracker:       trackerConn,
+		cfg:           cfg,
+		execClient:    execClient,
+		balance:       balance,
+		persistence:   pw,
+		logger:        logger,
+		pendingOrders: make(map[string]bool),
 	}
 }
 
@@ -130,6 +133,11 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 		return TradeDecision{RejectReason: "gate2_existing_position", Signals: sig}
 	}
 
+	// Gate 2b: No order currently in flight for this market
+	if e.pendingOrders[w.Slug] {
+		return TradeDecision{RejectReason: "gate2_order_in_flight", Signals: sig}
+	}
+
 	// Gate 3: Polymarket is already pricing the winning side at high confidence
 	if sig.PMConfidence < e.symbolFloat(e.cfg.MinPMConfidence, sig.Symbol) {
 		return TradeDecision{RejectReason: "gate3_pm_confidence", Signals: sig}
@@ -171,6 +179,9 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 func (e *Engine) executeLiveTrade(w tracker.ActiveWindowSummary, decision TradeDecision) {
 	sig := decision.Signals
 	tradeSize := e.cfg.TradeSizeUSD
+
+	e.pendingOrders[w.Slug] = true
+	defer delete(e.pendingOrders, w.Slug)
 
 	if !e.balance.Debit(tradeSize) {
 		e.logger.Warn().

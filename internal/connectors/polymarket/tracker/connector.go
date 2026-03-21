@@ -420,3 +420,81 @@ func (c *Connector) GetActiveMarket(slug string) *ActiveMarket {
 	}
 	return nil
 }
+
+// RecoverPositions queries the execution engine for existing trades and restores
+// MyPosition on any active market that already has a confirmed trade. This prevents
+// duplicate orders after a restart.
+func (c *Connector) RecoverPositions(ctx context.Context) error {
+	if c.execClient == nil {
+		return nil
+	}
+
+	trades, err := c.execClient.GetTrades(ctx)
+	if err != nil {
+		return fmt.Errorf("get trades: %w", err)
+	}
+
+	// Build map: assetID → trade (only CONFIRMED/MATCHED)
+	tradeByAsset := make(map[string]execution.Trade, len(trades))
+	for _, t := range trades {
+		if t.Status == "CONFIRMED" || t.Status == "MATCHED" {
+			tradeByAsset[t.AssetID] = t
+		}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	recovered := 0
+	for slug, am := range c.activeMarkets {
+		if am.MyPosition != nil {
+			continue
+		}
+
+		var matched *execution.Trade
+		if t, ok := tradeByAsset[am.YesAssetID]; ok {
+			matched = &t
+		} else if t, ok := tradeByAsset[am.NoAssetID]; ok {
+			matched = &t
+		}
+		if matched == nil {
+			continue
+		}
+
+		side := "no"
+		if matched.AssetID == am.YesAssetID {
+			side = "yes"
+		}
+
+		size := 0.0
+		cost := 0.0
+		fmt.Sscanf(matched.Size, "%f", &size)
+		fmt.Sscanf(matched.Price, "%f", &cost)
+
+		am.MyPosition = &Position{
+			AssetID:    matched.AssetID,
+			Side:       side,
+			EntryPrice: cost,
+			Size:       size,
+			Cost:       cost * size,
+			IsLive:     true,
+			OpenedAt:   time.Now(),
+		}
+		recovered++
+
+		c.logger.Info().
+			Str("slug", slug).
+			Str("asset_id", matched.AssetID).
+			Str("side", side).
+			Float64("size", size).
+			Float64("price", cost).
+			Msg("tracker: recovered position from execution engine")
+	}
+
+	c.logger.Info().
+		Int("trades_fetched", len(trades)).
+		Int("positions_recovered", recovered).
+		Msg("tracker: position recovery complete")
+
+	return nil
+}
