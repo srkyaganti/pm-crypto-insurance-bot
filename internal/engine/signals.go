@@ -23,10 +23,10 @@ func ComputeSignals(
 	var pmConfidence float64
 	if clPrice >= startPrice {
 		winningSide = "YES"
-		pmConfidence = w.YesBid
+		pmConfidence = w.YesAsk
 	} else {
 		winningSide = "NO"
-		pmConfidence = w.NoBid
+		pmConfidence = w.NoAsk
 	}
 
 	binanceMid := spotState.OrderBook.MidPrice

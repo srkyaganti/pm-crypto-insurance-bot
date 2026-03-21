@@ -187,7 +187,7 @@ func (e *Engine) executeLiveTrade(w tracker.ActiveWindowSummary, decision TradeD
 		assetID = w.YesAssetID
 	}
 
-	priceCeiling := e.symbolFloat(e.cfg.MinPMConfidence, sig.Symbol)
+	priceCeiling := sig.PMConfidence // use actual ask price from the PM book
 
 	orderReq := execution.MarketOrderRequest{
 		TokenID:   assetID,

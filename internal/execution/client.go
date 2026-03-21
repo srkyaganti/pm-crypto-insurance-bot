@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -59,7 +60,8 @@ func (c *Client) PlaceMarketOrder(ctx context.Context, requestID string, req Mar
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("order failed (status %d): %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var orderResp OrderResponse
