@@ -58,7 +58,7 @@ func (c *Client) PlaceMarketOrder(ctx context.Context, requestID string, req Mar
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
@@ -89,7 +89,7 @@ func (c *Client) Redeem(ctx context.Context, requestID string, req RedeemRequest
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
@@ -113,7 +113,7 @@ func (c *Client) GetRedeemStatus(ctx context.Context, transactionID string) (*Re
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
