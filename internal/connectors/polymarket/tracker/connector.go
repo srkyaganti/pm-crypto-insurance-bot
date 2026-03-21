@@ -41,6 +41,7 @@ type Connector struct {
 	activeMarkets   map[string]*ActiveMarket
 	scheduledTimers map[string]*time.Timer
 	marketHistory   []*CompletedMarket
+	pendingRedeems  []*PendingRedeem
 
 	running bool
 	mu      sync.RWMutex
@@ -78,6 +79,7 @@ func NewConnector(
 		activeMarkets:   make(map[string]*ActiveMarket),
 		scheduledTimers: make(map[string]*time.Timer),
 		marketHistory:   make([]*CompletedMarket, 0),
+		pendingRedeems:  make([]*PendingRedeem, 0),
 	}
 }
 
@@ -160,6 +162,14 @@ func (c *Connector) Start(ctx context.Context) error {
 		defer c.wg.Done()
 		c.strategyAnalysisLoop(ctx)
 	}()
+
+	if c.execClient != nil {
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			c.redeemLoop(ctx)
+		}()
+	}
 
 	c.logger.Info().
 		Int("active_markets", len(c.activeMarkets)).

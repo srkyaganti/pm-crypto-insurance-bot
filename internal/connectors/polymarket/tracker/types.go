@@ -81,10 +81,24 @@ type CompletedMarket struct {
 	Timestamp     time.Time
 }
 
+type PendingRedeem struct {
+	Slug           string
+	ConditionID    string
+	WinningOutcome string
+	PositionSide   string
+	PositionSize   float64
+	EntryPrice     float64
+	MarketEndTime  time.Time
+	QueuedAt       time.Time
+	Attempts       int
+}
+
 type TrackerConfig struct {
-	PreScheduleWindows int
-	CustomFeatures     bool
-	RedeemDelaySecs    int
+	PreScheduleWindows     int
+	CustomFeatures         bool
+	RedeemDelaySecs        int
+	RedeemMaxRetries       int
+	RedeemLoopIntervalSecs int
 }
 
 type ActiveWindowSummary struct {

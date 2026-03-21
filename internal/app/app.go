@@ -271,8 +271,11 @@ func (a *App) initializeConnectors(logger *zerolog.Logger) error {
 		}
 
 		trackerCfg := &tracker.TrackerConfig{
-			PreScheduleWindows: a.config.Polymarket.Tracker.PreScheduleWindows,
-			CustomFeatures:     a.config.Polymarket.Tracker.CustomFeatures,
+			PreScheduleWindows:     a.config.Polymarket.Tracker.PreScheduleWindows,
+			CustomFeatures:         a.config.Polymarket.Tracker.CustomFeatures,
+			RedeemDelaySecs:        a.config.Execution.RedeemDelaySecs,
+			RedeemMaxRetries:       a.config.Execution.RedeemMaxRetries,
+			RedeemLoopIntervalSecs: a.config.Execution.RedeemLoopIntervalSecs,
 		}
 
 		prefixToFeedID := a.config.PrefixToFeedID()

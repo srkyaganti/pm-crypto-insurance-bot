@@ -158,6 +158,30 @@ func (c *Client) GetCollateralBalance(ctx context.Context) (float64, error) {
 	return balance, nil
 }
 
+// GetTrades fetches all trades from the execution engine.
+func (c *Client) GetTrades(ctx context.Context) ([]Trade, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.cfg.URL+"/trades", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var trades []Trade
+	if err := json.NewDecoder(resp.Body).Decode(&trades); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return trades, nil
+}
+
 // RedeemAndWait submits a redeem and polls until terminal state or timeout.
 func (c *Client) RedeemAndWait(ctx context.Context, requestID, conditionID string) error {
 	redeemResp, err := c.Redeem(ctx, requestID, RedeemRequest{

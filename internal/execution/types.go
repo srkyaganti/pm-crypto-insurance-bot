@@ -49,3 +49,14 @@ type BalanceResponse struct {
 	Balance   string `json:"balance"`
 	Allowance string `json:"allowance"`
 }
+
+// Trade represents a trade returned from GET /trades.
+type Trade struct {
+	Market  string `json:"market"`
+	AssetID string `json:"asset_id"`
+	Side    string `json:"side"`
+	Size    string `json:"size"`
+	Price   string `json:"price"`
+	Status  string `json:"status"`
+	Outcome string `json:"outcome"`
+}

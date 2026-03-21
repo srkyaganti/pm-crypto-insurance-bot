@@ -93,9 +93,11 @@ strategy:
 execution:
   url: "http://localhost:3000"
   timeout_ms: 5000
-  redeem_delay_secs: 60
+  redeem_delay_secs: 30
   redeem_poll_interval_secs: 5
   redeem_timeout_secs: 120
+  redeem_max_retries: 5
+  redeem_loop_interval_secs: 15
 
 risk:
   kill_switch: false

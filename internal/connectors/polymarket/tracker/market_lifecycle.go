@@ -212,6 +212,18 @@ func (c *Connector) handleMarketEnd(slug string) {
 		endPrice = 0
 	}
 
+	// Read PM prices before winner determination (used as fallback)
+	pmState := c.state.GetPolymarket()
+	yesFinalPrice := 0.0
+	noFinalPrice := 0.0
+
+	if ob := pmState.OrderBooks[activeMarket.YesAssetID]; ob != nil {
+		yesFinalPrice = ob.MidPrice
+	}
+	if ob := pmState.OrderBooks[activeMarket.NoAssetID]; ob != nil {
+		noFinalPrice = ob.MidPrice
+	}
+
 	priceChange := 0.0
 	priceChangePct := 0.0
 	winningOutcome := "unknown"
@@ -225,17 +237,15 @@ func (c *Connector) handleMarketEnd(slug string) {
 		} else {
 			winningOutcome = "no"
 		}
-	}
-
-	pmState := c.state.GetPolymarket()
-	yesFinalPrice := 0.0
-	noFinalPrice := 0.0
-
-	if ob := pmState.OrderBooks[activeMarket.YesAssetID]; ob != nil {
-		yesFinalPrice = ob.MidPrice
-	}
-	if ob := pmState.OrderBooks[activeMarket.NoAssetID]; ob != nil {
-		noFinalPrice = ob.MidPrice
+	} else {
+		// Fallback: use PM book prices to infer winner
+		if yesFinalPrice > 0.5 {
+			winningOutcome = "yes"
+			c.logger.Warn().Float64("yes_price", yesFinalPrice).Msg("tracker: CL end price failed, using PM yes price as fallback for winner")
+		} else if noFinalPrice > 0.5 {
+			winningOutcome = "no"
+			c.logger.Warn().Float64("no_price", noFinalPrice).Msg("tracker: CL end price failed, using PM no price as fallback for winner")
+		}
 	}
 
 	pnl := 0.0
@@ -277,40 +287,28 @@ func (c *Connector) handleMarketEnd(slug string) {
 		Timestamp:      time.Now(),
 	}
 
-	// Live trading: redeem winning positions or reconcile on loss
+	// Live trading: queue redeem for winning positions, reconcile on loss
 	if activeMarket.MyPosition != nil && activeMarket.MyPosition.IsLive && c.execClient != nil {
-		if activeMarket.MyPosition.Side == winningOutcome {
-			delaySecs := c.config.RedeemDelaySecs
-			if delaySecs <= 0 {
-				delaySecs = 60
+		if activeMarket.MyPosition.Side == winningOutcome || winningOutcome == "unknown" {
+			pr := &PendingRedeem{
+				Slug:           slug,
+				ConditionID:    activeMarket.ConditionID,
+				WinningOutcome: winningOutcome,
+				PositionSide:   activeMarket.MyPosition.Side,
+				PositionSize:   activeMarket.MyPosition.Size,
+				EntryPrice:     activeMarket.MyPosition.EntryPrice,
+				MarketEndTime:  activeMarket.EndTime,
+				QueuedAt:       time.Now(),
 			}
+			c.mu.Lock()
+			c.pendingRedeems = append(c.pendingRedeems, pr)
+			c.mu.Unlock()
 			c.logger.Info().
 				Str("slug", slug).
-				Int("delay_secs", delaySecs).
-				Msg("tracker: waiting for on-chain resolution before redeem")
-			time.Sleep(time.Duration(delaySecs) * time.Second)
-
-			requestID := fmt.Sprintf("redeem-%s-%d", slug, time.Now().UnixMilli())
-			if err := c.execClient.RedeemAndWait(c.ctx, requestID, activeMarket.ConditionID); err != nil {
-				c.logger.Error().Err(err).Str("slug", slug).Msg("tracker: redeem failed")
-			} else {
-				payout := activeMarket.MyPosition.Size // shares x $1
-				c.balance.Credit(payout)
-				c.logger.Info().
-					Str("slug", slug).
-					Float64("payout", payout).
-					Msg("tracker: redeemed successfully")
-			}
-
-			go func() {
-				actual, err := c.execClient.GetCollateralBalance(c.ctx)
-				if err != nil {
-					c.logger.Error().Err(err).Msg("tracker: balance reconciliation failed")
-					return
-				}
-				c.balance.Reconcile(actual)
-			}()
+				Str("winning_outcome", winningOutcome).
+				Msg("tracker: queued pending redeem")
 		} else {
+			// Known loss — just reconcile balance
 			go func() {
 				actual, err := c.execClient.GetCollateralBalance(c.ctx)
 				if err == nil {

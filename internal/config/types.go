@@ -127,6 +127,8 @@ type ExecutionConfig struct {
 	RedeemDelaySecs        int    `yaml:"redeem_delay_secs"`
 	RedeemPollIntervalSecs int    `yaml:"redeem_poll_interval_secs"`
 	RedeemTimeoutSecs      int    `yaml:"redeem_timeout_secs"`
+	RedeemMaxRetries       int    `yaml:"redeem_max_retries"`
+	RedeemLoopIntervalSecs int    `yaml:"redeem_loop_interval_secs"`
 }
 
 type RiskConfig struct {

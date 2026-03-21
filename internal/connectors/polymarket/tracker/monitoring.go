@@ -31,6 +31,7 @@ func (c *Connector) logCurrentState() {
 		Bool("is_stale", pmState.IsStale).
 		Int("scheduled_timers", len(c.scheduledTimers)).
 		Int("history_count", len(c.marketHistory)).
+		Int("pending_redeems", len(c.pendingRedeems)).
 		Msg("tracker: state")
 
 	for slug, market := range c.activeMarkets {
