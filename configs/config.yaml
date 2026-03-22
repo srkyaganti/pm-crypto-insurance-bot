@@ -68,7 +68,7 @@ polymarket:
 strategy:
   enabled: true
   mode: "live"
-  entry_window_min_secs: 30
+  entry_window_min_secs: 15
   entry_window_max_secs: 90
   min_pm_confidence:
     BTC: 0.95
