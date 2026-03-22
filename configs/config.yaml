@@ -91,9 +91,9 @@ strategy:
     ETH: 1.0
     SOL: 1.0
   max_entry_price:
-    BTC: 0.95
-    ETH: 0.95
-    SOL: 0.95
+    BTC: 0.97
+    ETH: 0.97
+    SOL: 0.97
   sustained_conf_window_secs: 10
   min_gap_trend:
     BTC: 0.8
