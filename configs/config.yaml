@@ -94,7 +94,7 @@ strategy:
     BTC: 0.97
     ETH: 0.97
     SOL: 0.97
-  sustained_conf_window_secs: 10
+  sustained_conf_window_secs: 3
   min_gap_trend:
     BTC: 0.8
     ETH: 0.8
