@@ -50,8 +50,10 @@ func (e *Engine) monitorStopLoss(w tracker.ActiveWindowSummary) {
 	if !slState.EmptyBookSince.IsZero() {
 		elapsed := now.Sub(slState.EmptyBookSince)
 		if elapsed >= time.Duration(e.cfg.StopLoss.EmptyBookTimeoutS)*time.Second {
-			// Book just came back after extended empty period — panic sell
-			e.executeStopLossSell(w, slState, ourBid, "empty_book_recovery")
+			// Book just came back after extended empty period — only sell if bid is below stop
+			if ourBid < stopPrice && ourBid > e.cfg.StopLoss.MinSellPrice {
+				e.executeStopLossSell(w, slState, ourBid, "empty_book_recovery")
+			}
 		}
 		slState.EmptyBookSince = time.Time{} // reset
 		return
