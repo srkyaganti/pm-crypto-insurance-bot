@@ -79,9 +79,9 @@ strategy:
     ETH: 0.05
     SOL: 0.05
   depth_safety_multiplier:
-    BTC: 2.95
-    ETH: 2.95
-    SOL: 2.95
+    BTC: 2.85
+    ETH: 2.85
+    SOL: 2.85
   min_gap_pct:
     BTC: 0.02
     ETH: 0.02
@@ -96,9 +96,9 @@ strategy:
   stop_loss:
     enabled: true
     stop_price:
-      BTC: 0.70
-      ETH: 0.70
-      SOL: 0.70
+      BTC: 0.75
+      ETH: 0.75
+      SOL: 0.75
     confirm_ticks: 2
     min_time_remaining_s: 5
     empty_book_timeout_s: 10
