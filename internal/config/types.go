@@ -36,6 +36,17 @@ type StrategyConfig struct {
 	MaxSharesPerTrade         int                `yaml:"max_shares_per_trade" json:"max_shares_per_trade"`
 	MaxConcurrentPositions    int                `yaml:"max_concurrent_positions" json:"max_concurrent_positions"`
 	TradeSizeUSD              float64            `yaml:"trade_size_usd" json:"trade_size_usd"`
+	StopLoss                  StopLossConfig     `yaml:"stop_loss" json:"stop_loss"`
+}
+
+type StopLossConfig struct {
+	Enabled               bool               `yaml:"enabled" json:"enabled"`
+	StopPrice             map[string]float64 `yaml:"stop_price" json:"stop_price"`
+	ConfirmTicks          int                `yaml:"confirm_ticks" json:"confirm_ticks"`
+	MinTimeRemainingS     int                `yaml:"min_time_remaining_s" json:"min_time_remaining_s"`
+	EmptyBookTimeoutS     int                `yaml:"empty_book_timeout_s" json:"empty_book_timeout_s"`
+	EmptyBookSpreadThresh float64            `yaml:"empty_book_spread_thresh" json:"empty_book_spread_thresh"`
+	MinSellPrice          float64            `yaml:"min_sell_price" json:"min_sell_price"`
 }
 
 type PolymarketMarketConfig struct {

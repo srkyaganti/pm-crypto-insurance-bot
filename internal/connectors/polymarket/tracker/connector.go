@@ -378,7 +378,7 @@ func (c *Connector) GetActiveWindowSummaries() []ActiveWindowSummary {
 			noAsk = ob.BestAsk
 		}
 
-		summaries = append(summaries, ActiveWindowSummary{
+		s := ActiveWindowSummary{
 			Slug:           am.Slug,
 			Symbol:         am.Symbol,
 			WindowMin:      am.WindowType,
@@ -394,7 +394,14 @@ func (c *Connector) GetActiveWindowSummaries() []ActiveWindowSummary {
 			YesAssetID:     am.YesAssetID,
 			NoAssetID:      am.NoAssetID,
 			HasPosition:    am.MyPosition != nil,
-		})
+		}
+		if am.MyPosition != nil {
+			s.PositionSide = am.MyPosition.Side
+			s.PositionAssetID = am.MyPosition.AssetID
+			s.PositionSize = am.MyPosition.Size
+			s.PositionEntryPrice = am.MyPosition.EntryPrice
+		}
+		summaries = append(summaries, s)
 	}
 
 	return summaries

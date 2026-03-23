@@ -8,6 +8,17 @@ type confEntry struct {
 	Conf      float64
 }
 
+// stopLossState tracks stop-loss monitoring for a single position.
+type stopLossState struct {
+	BelowStopTicks  int       // consecutive ticks with bid < stop on real book
+	EmptyBookSince  time.Time // when empty book was first observed (zero = not empty)
+	SellPending     bool      // order in flight, skip this tick
+	RemainingShares float64   // shares left to sell (decremented on partial fills)
+	TotalProceeds   float64   // accumulated USDC from sells
+	TotalSharesSold float64   // accumulated shares sold
+	SellAttempts    int
+}
+
 // MarketSignals holds all computed signals for a single active market window.
 type MarketSignals struct {
 	Slug              string  `json:"slug"`

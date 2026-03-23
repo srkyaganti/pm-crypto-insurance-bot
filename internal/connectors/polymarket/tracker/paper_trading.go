@@ -129,3 +129,48 @@ func (c *Connector) GetMarketPosition(slug string) *Position {
 	}
 	return nil
 }
+
+// ClearPosition removes the position from an active market after a full stop-loss exit.
+func (c *Connector) ClearPosition(slug string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if market, exists := c.activeMarkets[slug]; exists {
+		market.MyPosition = nil
+	}
+}
+
+// UpdatePositionAfterPartialSell reduces position size and cost after a partial stop-loss fill.
+// If remaining size <= 0.001 (float tolerance), clears the position entirely.
+func (c *Connector) UpdatePositionAfterPartialSell(slug string, sharesSold, proceedsUSDC float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	market, exists := c.activeMarkets[slug]
+	if !exists || market.MyPosition == nil {
+		return
+	}
+
+	market.MyPosition.Size -= sharesSold
+	market.MyPosition.Cost -= proceedsUSDC
+	if market.MyPosition.Cost < 0 {
+		market.MyPosition.Cost = 0
+	}
+
+	if market.MyPosition.Size <= 0.001 {
+		market.MyPosition = nil
+	}
+}
+
+// RecordStopLossExit marks a market as having been exited via stop-loss,
+// so handleMarketEnd knows the position was already closed.
+func (c *Connector) RecordStopLossExit(slug string, proceeds, pnl float64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if market, exists := c.activeMarkets[slug]; exists {
+		market.StopLossExited = true
+		market.StopLossPnL = pnl
+		market.StopLossProceeds = proceeds
+	}
+}

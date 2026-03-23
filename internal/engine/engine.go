@@ -24,8 +24,9 @@ type Engine struct {
 	persistence *persistence.Writer
 	logger      zerolog.Logger
 
-	pendingOrders map[string]bool      // slug → order in flight (single-threaded, no mutex needed)
-	confHistory   map[string][]confEntry // slug → recent PM confidence observations
+	pendingOrders  map[string]bool         // slug → order in flight (single-threaded, no mutex needed)
+	confHistory    map[string][]confEntry   // slug → recent PM confidence observations
+	stopLossStates map[string]*stopLossState // slug → stop-loss monitoring state
 }
 
 func NewEngine(
@@ -39,15 +40,16 @@ func NewEngine(
 ) *Engine {
 	logger := baseLogger.With().Str("component", "engine").Logger()
 	return &Engine{
-		state:         store,
-		tracker:       trackerConn,
-		cfg:           cfg,
-		execClient:    execClient,
-		balance:       balance,
-		persistence:   pw,
-		logger:        logger,
-		pendingOrders: make(map[string]bool),
-		confHistory:   make(map[string][]confEntry),
+		state:          store,
+		tracker:        trackerConn,
+		cfg:            cfg,
+		execClient:     execClient,
+		balance:        balance,
+		persistence:    pw,
+		logger:         logger,
+		pendingOrders:  make(map[string]bool),
+		confHistory:    make(map[string][]confEntry),
+		stopLossStates: make(map[string]*stopLossState),
 	}
 }
 
@@ -109,12 +111,22 @@ func (e *Engine) tick() {
 	activeSlugs := make(map[string]bool)
 	for _, w := range e.tracker.GetActiveWindowSummaries() {
 		activeSlugs[w.Slug] = true
-		e.evaluateMarket(w)
+		e.monitorStopLoss(w)
+		// Skip entry evaluation if stop-loss is active for this slug
+		if _, hasSL := e.stopLossStates[w.Slug]; !hasSL {
+			e.evaluateMarket(w)
+		}
 	}
 	// Prune confHistory for inactive slugs
 	for slug := range e.confHistory {
 		if !activeSlugs[slug] {
 			delete(e.confHistory, slug)
+		}
+	}
+	// Prune stopLossStates for inactive slugs
+	for slug := range e.stopLossStates {
+		if !activeSlugs[slug] {
+			delete(e.stopLossStates, slug)
 		}
 	}
 }

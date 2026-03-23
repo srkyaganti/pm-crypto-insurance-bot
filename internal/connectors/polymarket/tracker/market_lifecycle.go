@@ -251,13 +251,21 @@ func (c *Connector) handleMarketEnd(slug string) {
 	pnl := 0.0
 	marketResult := "no_position"
 
-	if activeMarket.MyPosition != nil {
+	if activeMarket.StopLossExited {
+		// Position was fully exited via stop-loss before resolution
+		marketResult = "stop_loss"
+		pnl = activeMarket.StopLossPnL
+	} else if activeMarket.MyPosition != nil {
 		marketResult = "loss"
 		if activeMarket.MyPosition.Side == winningOutcome {
 			marketResult = "win"
 			pnl = activeMarket.MyPosition.Size * (1.0 - activeMarket.MyPosition.EntryPrice)
 		} else {
 			pnl = -activeMarket.MyPosition.Size * activeMarket.MyPosition.EntryPrice
+		}
+		// If partial stop-loss happened, add the stop-loss PnL
+		if activeMarket.StopLossProceeds > 0 {
+			pnl += activeMarket.StopLossPnL
 		}
 	}
 
