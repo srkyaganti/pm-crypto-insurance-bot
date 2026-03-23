@@ -251,7 +251,11 @@ func (c *Connector) handleMarketEnd(slug string) {
 	pnl := 0.0
 	marketResult := "no_position"
 
-	if activeMarket.MyPosition != nil {
+	if activeMarket.StopLossExited && activeMarket.MyPosition == nil {
+		// Fully exited via stop-loss before resolution
+		marketResult = "stop_loss"
+		pnl = activeMarket.StopLossPnL
+	} else if activeMarket.MyPosition != nil {
 		marketResult = "loss"
 		if activeMarket.MyPosition.Side == winningOutcome {
 			marketResult = "win"
@@ -259,6 +263,12 @@ func (c *Connector) handleMarketEnd(slug string) {
 		} else {
 			pnl = -activeMarket.MyPosition.Size * activeMarket.MyPosition.EntryPrice
 		}
+		// Add any partial stop-loss proceeds
+		pnl += activeMarket.StopLossPnL
+	} else if activeMarket.StopLossProceeds > 0 {
+		// Stop-loss proceeds exist but position was cleared some other way
+		marketResult = "stop_loss"
+		pnl = activeMarket.StopLossPnL
 	}
 
 	completedMarket := &CompletedMarket{
@@ -280,13 +290,25 @@ func (c *Connector) handleMarketEnd(slug string) {
 		MarketResult:   marketResult,
 		PaperTrades:    activeMarket.PaperTrades,
 		Position:       activeMarket.MyPosition,
-		PnL:            pnl,
-		DidWeTrade:     activeMarket.MyPosition != nil,
-		YesFinalPrice:  yesFinalPrice,
+		PnL:              pnl,
+		DidWeTrade:       activeMarket.MyPosition != nil || activeMarket.StopLossExited,
+		StopLossExited:   activeMarket.StopLossExited,
+		StopLossPnL:      activeMarket.StopLossPnL,
+		StopLossProceeds: activeMarket.StopLossProceeds,
+		YesFinalPrice:    yesFinalPrice,
 		NoFinalPrice:   noFinalPrice,
 		Timestamp:      time.Now(),
 	}
 
+	// Live trading: if fully exited via stop-loss, just reconcile balance
+	if activeMarket.StopLossExited && activeMarket.MyPosition == nil && c.execClient != nil {
+		go func() {
+			actual, err := c.execClient.GetCollateralBalance(c.ctx)
+			if err == nil {
+				c.balance.Reconcile(actual)
+			}
+		}()
+	} else
 	// Live trading: queue redeem for winning positions, reconcile on loss
 	if activeMarket.MyPosition != nil && activeMarket.MyPosition.IsLive && c.execClient != nil {
 		if activeMarket.MyPosition.Side == winningOutcome || winningOutcome == "unknown" {
@@ -335,10 +357,13 @@ func (c *Connector) handleMarketEnd(slug string) {
 		"winning_outcome":  completedMarket.WinningOutcome,
 		"market_result":    completedMarket.MarketResult,
 		"did_we_trade":     completedMarket.DidWeTrade,
-		"pnl":              completedMarket.PnL,
-		"num_paper_trades": len(completedMarket.PaperTrades),
-		"yes_final_price":  completedMarket.YesFinalPrice,
-		"no_final_price":   completedMarket.NoFinalPrice,
+		"pnl":                completedMarket.PnL,
+		"stop_loss_exited":   completedMarket.StopLossExited,
+		"stop_loss_pnl":      completedMarket.StopLossPnL,
+		"stop_loss_proceeds": completedMarket.StopLossProceeds,
+		"num_paper_trades":   len(completedMarket.PaperTrades),
+		"yes_final_price":    completedMarket.YesFinalPrice,
+		"no_final_price":     completedMarket.NoFinalPrice,
 	})
 
 	if err := c.marketConnector.UnsubscribeMany([]string{

@@ -24,6 +24,9 @@ func Validate(cfg *Config) error {
 	if err := validateHTTPServer(cfg); err != nil {
 		return err
 	}
+	if err := validateStopLoss(cfg); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -162,6 +165,34 @@ func validateHTTPServer(cfg *Config) error {
 	}
 	if cfg.HTTPServer.WriteTimeoutMs <= 0 {
 		cfg.HTTPServer.WriteTimeoutMs = 10000
+	}
+	return nil
+}
+
+func validateStopLoss(cfg *Config) error {
+	sl := &cfg.Strategy.StopLoss
+	if !sl.Enabled {
+		return nil
+	}
+	if sl.ConfirmTicks <= 0 {
+		sl.ConfirmTicks = 2
+	}
+	if sl.MinTimeRemainingSecs <= 0 {
+		sl.MinTimeRemainingSecs = 5
+	}
+	if sl.EmptyBookTimeoutSecs <= 0 {
+		sl.EmptyBookTimeoutSecs = 10
+	}
+	if sl.EmptyBookSpreadThresh <= 0 {
+		sl.EmptyBookSpreadThresh = 0.50
+	}
+	if sl.MinSellPrice <= 0 {
+		sl.MinSellPrice = 0.10
+	}
+	for sym, price := range sl.StopPrice {
+		if price <= 0 || price >= 1 {
+			return fmt.Errorf("strategy.stop_loss.stop_price[%s] must be in (0, 1), got %f", sym, price)
+		}
 	}
 	return nil
 }

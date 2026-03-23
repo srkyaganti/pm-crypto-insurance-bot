@@ -24,6 +24,10 @@ type ActiveMarket struct {
 	PaperTrades []PaperTrade
 	MyPosition  *Position
 
+	StopLossExited   bool
+	StopLossPnL      float64
+	StopLossProceeds float64
+
 	EndTimer *time.Timer
 
 	LastUpdate time.Time
@@ -75,6 +79,10 @@ type CompletedMarket struct {
 	PnL         float64
 	DidWeTrade  bool
 
+	StopLossExited   bool
+	StopLossPnL      float64
+	StopLossProceeds float64
+
 	YesFinalPrice float64
 	NoFinalPrice  float64
 	Volume        float64
@@ -113,4 +121,9 @@ type ActiveWindowSummary struct {
 	YesAssetID  string
 	NoAssetID   string
 	HasPosition bool
+
+	PositionSide       string
+	PositionAssetID    string
+	PositionSize       float64
+	PositionEntryPrice float64
 }

@@ -8,7 +8,7 @@ type MarketOrderRequest struct {
 	TickSize  string  `json:"tickSize"`
 	NegRisk   bool    `json:"negRisk"`
 	OrderType string  `json:"orderType"`
-	Price     float64 `json:"price"`
+	Price     float64 `json:"price,omitempty"`
 }
 
 // OrderResponse is returned from POST /orders/market.

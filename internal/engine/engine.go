@@ -24,7 +24,8 @@ type Engine struct {
 	persistence *persistence.Writer
 	logger      zerolog.Logger
 
-	pendingOrders map[string]bool // slug → order in flight (single-threaded, no mutex needed)
+	pendingOrders  map[string]bool           // slug → order in flight (single-threaded, no mutex needed)
+	stopLossStates map[string]*stopLossState // slug → stop-loss monitoring state
 }
 
 func NewEngine(
@@ -45,7 +46,8 @@ func NewEngine(
 		balance:       balance,
 		persistence:   pw,
 		logger:        logger,
-		pendingOrders: make(map[string]bool),
+		pendingOrders:  make(map[string]bool),
+		stopLossStates: make(map[string]*stopLossState),
 	}
 }
 
@@ -79,8 +81,25 @@ func (e *Engine) tick() {
 	if e.tracker == nil {
 		return
 	}
-	for _, w := range e.tracker.GetActiveWindowSummaries() {
-		e.evaluateMarket(w)
+
+	summaries := e.tracker.GetActiveWindowSummaries()
+	activeSlugs := make(map[string]bool, len(summaries))
+
+	for _, w := range summaries {
+		activeSlugs[w.Slug] = true
+
+		if w.HasPosition || e.stopLossStates[w.Slug] != nil {
+			e.monitorStopLoss(w)
+		} else {
+			e.evaluateMarket(w)
+		}
+	}
+
+	// Prune stop-loss states for markets no longer active
+	for slug := range e.stopLossStates {
+		if !activeSlugs[slug] {
+			delete(e.stopLossStates, slug)
+		}
 	}
 }
 

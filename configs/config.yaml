@@ -93,6 +93,17 @@ strategy:
   max_shares_per_trade: 200
   max_concurrent_positions: 5
   trade_size_usd: 1.0
+  stop_loss:
+    enabled: true
+    stop_price:
+      BTC: 0.80
+      ETH: 0.80
+      SOL: 0.75
+    confirm_ticks: 2
+    min_time_remaining_s: 5
+    empty_book_timeout_s: 10
+    empty_book_spread_thresh: 0.50
+    min_sell_price: 0.10
 
 execution:
   url: "http://localhost:3000"
