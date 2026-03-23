@@ -92,7 +92,7 @@ strategy:
     SOL: 49.9
   max_shares_per_trade: 200
   max_concurrent_positions: 5
-  trade_size_usd: 1.0
+  trade_size_usd: 1.03
   stop_loss:
     enabled: true
     stop_price:
