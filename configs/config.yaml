@@ -79,9 +79,9 @@ strategy:
     ETH: 0.05
     SOL: 0.05
   depth_safety_multiplier:
-    BTC: 2.65
-    ETH: 2.65
-    SOL: 2.65
+    BTC: 2.70
+    ETH: 2.70
+    SOL: 2.70
   min_gap_pct:
     BTC: 0.02
     ETH: 0.02
