@@ -69,30 +69,30 @@ strategy:
   enabled: true
   mode: "live"
   entry_window_min_secs: 30
-  entry_window_max_secs: 100
+  entry_window_max_secs: 90
   min_pm_confidence:
-    BTC: 0.93
-    ETH: 0.93
-    SOL: 0.93
+    BTC: 0.95
+    ETH: 0.95
+    SOL: 0.95
   max_cl_binance_divergence_pct:
     BTC: 0.05
     ETH: 0.05
     SOL: 0.05
   depth_safety_multiplier:
-    BTC: 2.85
-    ETH: 2.85
-    SOL: 2.85
+    BTC: 3.0
+    ETH: 3.0
+    SOL: 3.0
   min_gap_pct:
     BTC: 0.02
     ETH: 0.02
     SOL: 0.02
   min_depth:
-    BTC: 0.499
-    ETH: 49.9
-    SOL: 49.9
+    BTC: 0.5
+    ETH: 50.0
+    SOL: 50.0
   max_shares_per_trade: 200
   max_concurrent_positions: 5
-  trade_size_usd: 3.0
+  trade_size_usd: 2.0
   stop_loss:
     enabled: true
     stop_price:
