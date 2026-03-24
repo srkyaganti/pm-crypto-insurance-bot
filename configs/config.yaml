@@ -79,9 +79,9 @@ strategy:
     ETH: 0.05
     SOL: 0.05
   depth_safety_multiplier:
-    BTC: 3.0
-    ETH: 3.0
-    SOL: 3.0
+    BTC: 2.9
+    ETH: 2.9
+    SOL: 2.9
   min_gap_pct:
     BTC: 0.02
     ETH: 0.02
@@ -91,8 +91,8 @@ strategy:
     ETH: 50.0
     SOL: 50.0
   max_shares_per_trade: 200
-  max_concurrent_positions: 5
-  trade_size_usd: 2.0
+  max_concurrent_positions: 10
+  trade_size_usd: 4.0
   stop_loss:
     enabled: true
     stop_price:
