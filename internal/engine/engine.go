@@ -162,6 +162,11 @@ func (e *Engine) runGates(w tracker.ActiveWindowSummary, sig MarketSignals) Trad
 		return TradeDecision{RejectReason: "gate3_pm_confidence", Signals: sig}
 	}
 
+	// Gate 3b: PM ask must be at or below max entry price — don't overpay
+	if maxEntry := e.symbolFloat(e.cfg.MaxEntryPrice, sig.Symbol); maxEntry > 0 && sig.PMConfidence > maxEntry {
+		return TradeDecision{RejectReason: "gate3b_price_too_high", Signals: sig}
+	}
+
 	// Gate 4: CL and Binance agree on which side of start_price, and divergence is small
 	if !sig.CLBinanceAgree || sig.DivergencePct > e.symbolFloat(e.cfg.MaxCLBinanceDivergencePct, sig.Symbol) {
 		return TradeDecision{RejectReason: "gate4_cl_binance_agreement", Signals: sig}
@@ -225,7 +230,10 @@ func (e *Engine) executeLiveTrade(w tracker.ActiveWindowSummary, decision TradeD
 		assetID = w.YesAssetID
 	}
 
-	priceCeiling := sig.PMConfidence // use actual ask price from the PM book
+	priceCeiling := sig.PMConfidence
+	if maxEntry := e.symbolFloat(e.cfg.MaxEntryPrice, sig.Symbol); maxEntry > 0 && priceCeiling > maxEntry {
+		priceCeiling = maxEntry
+	}
 
 	orderReq := execution.MarketOrderRequest{
 		TokenID:   assetID,

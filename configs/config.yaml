@@ -69,7 +69,7 @@ strategy:
   enabled: true
   mode: "live"
   entry_window_min_secs: 30
-  entry_window_max_secs: 90
+  entry_window_max_secs: 150
   min_pm_confidence:
     BTC: 0.95
     ETH: 0.95
@@ -90,11 +90,15 @@ strategy:
     BTC: 0.5
     ETH: 50.0
     SOL: 50.0
+  max_entry_price:
+    BTC: 0.97
+    ETH: 0.97
+    SOL: 0.97
   max_shares_per_trade: 200
   max_concurrent_positions: 10
-  trade_size_usd: 4.0
+  trade_size_usd: 1.0
   stop_loss:
-    enabled: true
+    enabled: false
     stop_price:
       BTC: 0.70
       ETH: 0.70
